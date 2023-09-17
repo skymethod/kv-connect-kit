@@ -3,13 +3,13 @@
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
-// https://chromium.googlesource.com/v8/v8/+/refs/heads/main/src/objects/value-serializer.cc
 
 import { encodeBinary as encodeAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
 import { encodeBinary as encodeSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
 import { decodeBinary as decodeSnapshotReadOutput } from './gen/messages/datapath/SnapshotReadOutput.ts';
 import { decodeBinary as decodeAtomicWriteOutput } from './gen/messages/datapath/AtomicWriteOutput.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { decodeV8, encodeV8 } from './v8.ts';
 
 export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<unknown> {
 
@@ -35,7 +35,7 @@ export async function openKv(url: string, { accessToken }: { accessToken: string
         for (const range of result.ranges) {
             for (const entry of range.values) {
                 console.log(entry.key);
-                console.log(new TextDecoder().decode(entry.value));
+                console.log(decodeV8(entry.value));
                 console.log(entry.versionstamp);
                 console.log(entry.encoding);
             }
@@ -46,7 +46,14 @@ export async function openKv(url: string, { accessToken }: { accessToken: string
         const atomicWriteUrl = new URL('/atomic_write', endpointUrl).toString();
 
         const write: AtomicWrite = {
-            enqueues: [],
+            enqueues: [
+                {
+                    backoffSchedule: [],
+                    deadlineMs: '10000',
+                    kvKeysIfUndelivered: [],
+                    payload: encodeV8('hi!'),
+                }
+            ],
             kvChecks: [],
             kvMutations: [],
         };
