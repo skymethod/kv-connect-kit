@@ -2,8 +2,8 @@
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
-import { encodeHex } from './bytes.ts';
-import { SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { encodeHex, equalBytes } from './bytes.ts';
+import { ReadRange, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
 import { DatabaseMetadata, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector } from './kv_types.ts';
 import { decodeV8 } from './v8.ts';
@@ -14,20 +14,33 @@ export async function openKv(url: string, { accessToken }: { accessToken: string
 
 //
 
+function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
+    return {
+        start: packedKey,
+        end: new Uint8Array([ 0xff ]),
+        limit: 1,
+        reverse: false,
+    }
+}
+
+//
+
 class RemoteKv implements Kv {
 
     private readonly url: string;
     private readonly accessToken: string;
+    private readonly wrapUnknownValues: boolean;
 
     private metadata: DatabaseMetadata;
 
-    private constructor(url: string, accessToken: string, metadata: DatabaseMetadata) {
+    private constructor(url: string, accessToken: string, wrapUnknownValues: boolean, metadata: DatabaseMetadata) {
         this.url = url;
         this.accessToken = accessToken;
+        this.wrapUnknownValues = wrapUnknownValues;
         this.metadata = metadata;
     }
 
-    static async of(url: string, { accessToken }: { accessToken: string }) {
+    static async of(url: string, { accessToken, wrapUnknownValues = false }: { accessToken: string, wrapUnknownValues?: boolean }) {
         const metadata = await fetchDatabaseMetadata(url, accessToken);
         const { version, endpoints, token, expiresAt } = metadata;
         if (version !== 1) throw new Error(`Unsupported version: ${version}`);
@@ -35,16 +48,43 @@ class RemoteKv implements Kv {
         if (endpoints.length === 0) throw new Error(`No endpoints`);
         const expiresTime = new Date(expiresAt).getTime();
         console.log(`Expires in ${expiresTime - Date.now()}ms`);
-        return new RemoteKv(url, accessToken, metadata);
+        return new RemoteKv(url, accessToken, wrapUnknownValues, metadata);
     }
 
-    get<T = unknown>(key: KvKey, options?: { consistency?: KvConsistencyLevel | undefined; } | undefined): Promise<KvEntryMaybe<T>> {
-        throw new Error(`implement: RemoteKv.get(${JSON.stringify({ key, options })})`);
+
+    async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+        const { wrapUnknownValues } = this;
+        const packedKey = packKey(key);
+        const req: SnapshotRead = {
+            ranges: [ computeReadRangeForKey(packedKey) ]
+        }
+        const res = await this.snapshotRead(req, consistency);
+        for (const range of res.ranges) {
+            for (const item of range.values) {
+                if (equalBytes(item.key, packedKey)) return { key, value: decodeV8(item.value, { wrapUnknownValues }) as T, versionstamp: encodeHex(item.versionstamp) };
+            }
+        }
+        return { key, value: null, versionstamp: null };
     }
 
     // deno-lint-ignore no-explicit-any
-    getMany<T>(keys: readonly unknown[], options?: { consistency?: KvConsistencyLevel }): Promise<any> {
-        throw new Error(`implement: RemoteKv.getMany(${JSON.stringify({ keys, options })})`);
+    async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
+        const { wrapUnknownValues } = this;
+        const packedKeys = keys.map(packKey);
+        const packedKeysHex = packedKeys.map(encodeHex);
+        const rt: KvEntryMaybe<T>[] = keys.map(v => ({ key: v, value: null, versionstamp: null }));
+        const req: SnapshotRead = {
+            ranges: packedKeys.map(computeReadRangeForKey)
+        }
+        const res = await this.snapshotRead(req, consistency);
+        for (const range of res.ranges) {
+            for (const item of range.values) {
+                const itemKeyHex = encodeHex(item.key);
+                const i = packedKeysHex.indexOf(itemKeyHex);
+                if (i >= 0) rt[i] = { key: keys[i], value: decodeV8(item.value, { wrapUnknownValues }) as T, versionstamp: encodeHex(item.versionstamp) };
+            }
+        }
+        return rt;
     }
 
     set(key: KvKey, value: unknown, options?: { expireIn?: number | undefined; } | undefined): Promise<KvCommitResult> {
@@ -79,17 +119,19 @@ class RemoteKv implements Kv {
 
     //
 
-    private async snapshotRead(req: SnapshotRead): Promise<SnapshotReadOutput> {
+    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
         const { metadata } = this;
         // TODO better endpoint selection
         // TODO refresh metadata if necessary
-        const endpointUrl = metadata.endpoints[0].url;
-        const snapshotReadUrl = new URL('/snapshot_read', endpointUrl).toString();
+        const endpoint = consistency === 'strong' ? metadata.endpoints.find(v => v.consistency === 'strong') : metadata.endpoints[0];
+        if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
+        const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
         const accessToken = metadata.token;
         return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
     }
 
     async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit: limitOpt, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+        const { wrapUnknownValues } = this;
         const req: SnapshotRead = { ranges: [] };
         if ('prefix' in selector) {
             throw new Error(`implement prefix-based`);
@@ -102,12 +144,12 @@ class RemoteKv implements Kv {
             req.ranges.push({ start, end, limit, reverse });
         }
 
-        const res = await this.snapshotRead(req);
+        const res = await this.snapshotRead(req, consistency);
         for (const range of res.ranges) {
             for (const entry of range.values) {
                 const key = unpackKey(entry.key);
                 if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
-                const value = decodeV8(entry.value, { wrapUnknownValues: true }) as T;
+                const value = decodeV8(entry.value, { wrapUnknownValues }) as T;
                 const versionstamp = encodeHex(entry.versionstamp);
                 yield { key, value, versionstamp };
             }
@@ -115,7 +157,6 @@ class RemoteKv implements Kv {
         }
         outCursor[0] = 'TODO';
     }
-
 }
 
 class RemoteKvListIterator<T> implements KvListIterator<T> {

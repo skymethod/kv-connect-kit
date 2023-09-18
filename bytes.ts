@@ -9,6 +9,14 @@ export function encodeHex(arr: Uint8Array): string {
     return decoder.decode(_encodeHex(arr));
 }
 
+export function equalBytes(lhs: Uint8Array, rhs: Uint8Array) {
+    if (lhs.length !== rhs.length) return false;
+    for (let i = 0; i < lhs.length; i++) {
+        if (lhs[i] !== rhs[i]) return false;
+    }
+    return true;
+}
+
 //
 
 const decoder = new TextDecoder();
