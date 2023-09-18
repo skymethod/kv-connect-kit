@@ -1,4 +1,4 @@
-import { encode as _encodeHex } from 'https://deno.land/std@0.201.0/encoding/hex.ts';
+import { encode as _encodeHex, decode as _decodeHex } from 'https://deno.land/std@0.201.0/encoding/hex.ts';
 
 export function checkEnd(bytes: Uint8Array, pos: number) {
     const extra = bytes.length - pos;
@@ -7,6 +7,10 @@ export function checkEnd(bytes: Uint8Array, pos: number) {
 
 export function encodeHex(arr: Uint8Array): string {
     return decoder.decode(_encodeHex(arr));
+}
+
+export function decodeHex(str: string): Uint8Array {
+    return _decodeHex(new TextEncoder().encode(str));
 }
 
 export function equalBytes(lhs: Uint8Array, rhs: Uint8Array) {

@@ -2,10 +2,10 @@
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
-import { encodeHex, equalBytes } from './bytes.ts';
-import { AtomicWrite, AtomicWriteOutput, ReadRange, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
+import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
-import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector } from './kv_types.ts';
+import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvU64 } from './kv_types.ts';
 import { decodeV8, encodeV8 } from './v8.ts';
 
 export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<Kv> {    
@@ -21,6 +21,48 @@ function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
         limit: 1,
         reverse: false,
     }
+}
+
+function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheck {
+    return {
+        key: packKey(key),
+        versionstamp: versionstamp === null ? new Uint8Array() : decodeHex(versionstamp),
+    }
+}
+
+function computeKvMutationMessage(mut: KvMutation): KvMutationMessage {
+    const { key, type } = mut;
+    return {
+        key: packKey(key),
+        mutationType: type === 'delete' ? 'M_CLEAR' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
+        value: mut.type === 'delete' ? undefined : { data: encodeV8(mut.value), encoding: 'VE_V8' },
+    }
+}
+
+function computeEnqueueMessage(value: unknown, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): Enqueue {
+    return {
+        backoffSchedule: [ 100, 200, 400, 800 ],
+        deadlineMs: `${Date.now() + delay}`,
+        kvKeysIfUndelivered: keysIfUndelivered.map(packKey),
+        payload: encodeV8(value),
+    }
+}
+
+async function fetchNewDatabaseMetadata(url: string, accessToken: string): Promise<DatabaseMetadata> {
+    console.log('Fetching database metadata...');
+    const metadata = await fetchDatabaseMetadata(url, accessToken);
+    const { version, endpoints, token } = metadata;
+    if (version !== 1) throw new Error(`Unsupported version: ${version}`);
+    if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
+    if (endpoints.length === 0) throw new Error(`No endpoints`);
+    const expiresMillis = computeExpiresInMillis(metadata);
+    console.log(`Expires in ${Math.round((expiresMillis / 1000 / 60))} minutes`); // expect 60 minutes
+    return metadata;
+}
+
+function computeExpiresInMillis({ expiresAt }: DatabaseMetadata): number {
+    const expiresTime = new Date(expiresAt).getTime();
+    return expiresTime - Date.now();
 }
 
 //
@@ -41,13 +83,7 @@ class RemoteKv implements Kv {
     }
 
     static async of(url: string, { accessToken, wrapUnknownValues = false }: { accessToken: string, wrapUnknownValues?: boolean }) {
-        const metadata = await fetchDatabaseMetadata(url, accessToken);
-        const { version, endpoints, token, expiresAt } = metadata;
-        if (version !== 1) throw new Error(`Unsupported version: ${version}`);
-        if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
-        if (endpoints.length === 0) throw new Error(`No endpoints`);
-        const expiresTime = new Date(expiresAt).getTime();
-        console.log(`Expires in ${expiresTime - Date.now()}ms`);
+        const metadata = await fetchNewDatabaseMetadata(url, accessToken);
         return new RemoteKv(url, accessToken, wrapUnknownValues, metadata);
     }
 
@@ -130,16 +166,10 @@ class RemoteKv implements Kv {
         return new RemoteKvListIterator<T>(generator, () => outCursor[0]);
     }
 
-    async enqueue(value: unknown, { delay, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] }  = {}): Promise<KvCommitResult> {
-        if (typeof delay === 'number') throw new Error(`'delay' not supported over KV Connect`);
+    async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
         const req: AtomicWrite = {
             enqueues: [
-                {
-                    backoffSchedule: [], // TODO ???
-                    deadlineMs: '10000', // TODO ???
-                    kvKeysIfUndelivered: keysIfUndelivered.map(packKey),
-                    payload: encodeV8(value),
-                }
+                computeEnqueueMessage(value, opts),
             ],
             kvChecks: [],
             kvMutations: [],
@@ -154,7 +184,15 @@ class RemoteKv implements Kv {
     }
 
     atomic(): AtomicOperation {
-        throw new Error(`implement: RemoteKv.atomic()`);
+        let commitCalled = false;
+        return new RemoteAtomicOperation(async req => {
+            if (commitCalled) throw new Error(`'commit' already called for this atomic`);
+            const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
+            commitCalled = true;
+            if (status === 'AW_CHECK_FAILURE') return { ok: false };
+            if (status !== 'AW_SUCCESS') throw new Error(`enqueue failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+            return { ok: true, versionstamp: encodeHex(versionstamp) };
+        });
     }
 
     close(): void {
@@ -163,17 +201,22 @@ class RemoteKv implements Kv {
 
     //
 
-    private locateEndpoint(consistency: KvConsistencyLevel): EndpointInfo {
+    private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
+        const { url, accessToken } = this;
+        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken);
+        }
         const { metadata } = this;
-        // TODO refresh metadata if necessary
-        const endpoint = consistency === 'strong' ? metadata.endpoints.find(v => v.consistency === 'strong') : metadata.endpoints[0];
+        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong').at(0);
+        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong').at(0);
+        const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
         if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
         return endpoint;
     }
 
     private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
         const { metadata } = this;
-        const endpoint = this.locateEndpoint(consistency);
+        const endpoint = await this.locateEndpoint(consistency);
         const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
         const accessToken = metadata.token;
         return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
@@ -181,7 +224,7 @@ class RemoteKv implements Kv {
 
     private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
         const { metadata } = this;
-        const endpoint = this.locateEndpoint('strong');
+        const endpoint = await this.locateEndpoint('strong');
         const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
         const accessToken = metadata.token;
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
@@ -245,6 +288,66 @@ class RemoteKvListIterator<T> implements KvListIterator<T> {
     // deno-lint-ignore no-explicit-any
     throw?(e?: any): Promise<IteratorResult<KvEntry<T>, any>> {
         return this.generator.throw(e);
+    }
+
+}
+
+class RemoteKvU64 implements KvU64 {
+    readonly value: bigint;
+
+    constructor(value: bigint) {
+        this.value = value;
+    }
+
+}
+
+class RemoteAtomicOperation implements AtomicOperation {
+
+    private readonly _commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>;
+    private readonly write: AtomicWrite = { enqueues: [], kvChecks: [], kvMutations: [] };
+
+    constructor(commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>) {
+        this._commit = commit;
+    }
+
+    check(...checks: AtomicCheck[]): this {
+        this.write.kvChecks.push(...checks.map(computeKvCheckMessage));
+        return this;
+    }
+
+    mutate(...mutations: KvMutation[]): this {
+        this.write.kvMutations.push(...mutations.map(computeKvMutationMessage));
+        return this;
+    }
+
+    sum(key: KvKey, n: bigint): this {
+        return this.mutate({ type: 'sum', key, value: new RemoteKvU64(n) });
+    }
+
+    min(key: KvKey, n: bigint): this {
+        return this.mutate({ type: 'min', key, value: new RemoteKvU64(n) });
+    }
+
+    max(key: KvKey, n: bigint): this {
+        return this.mutate({ type: 'max', key, value: new RemoteKvU64(n) });
+    }
+
+    set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
+        if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`);
+        return this.mutate({ type: 'set', key, value });
+    }
+
+    delete(key: KvKey): this {
+        return this.mutate({ type: 'delete', key });
+    }
+
+    enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): this {
+        this.write.enqueues.push(computeEnqueueMessage(value, opts));
+        return this;
+    }
+
+    commit(): Promise<KvCommitResult | KvCommitError> {
+        return this._commit(this.write);
     }
 
 }
