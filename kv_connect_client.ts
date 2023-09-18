@@ -3,10 +3,10 @@
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
 import { encodeHex, equalBytes } from './bytes.ts';
-import { ReadRange, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
-import { DatabaseMetadata, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
+import { AtomicWrite, AtomicWriteOutput, ReadRange, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector } from './kv_types.ts';
-import { decodeV8 } from './v8.ts';
+import { decodeV8, encodeV8 } from './v8.ts';
 
 export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<Kv> {    
     return await RemoteKv.of(url, { accessToken });
@@ -87,12 +87,41 @@ class RemoteKv implements Kv {
         return rt;
     }
 
-    set(key: KvKey, value: unknown, options?: { expireIn?: number | undefined; } | undefined): Promise<KvCommitResult> {
-        throw new Error(`implement: RemoteKv.set(${JSON.stringify({ key, value, options })})`);
+    async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
+        if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`);
+        const req: AtomicWrite = {
+            enqueues: [],
+            kvChecks: [],
+            kvMutations: [
+                {
+                    key: packKey(key),
+                    mutationType: 'M_SET',
+                    value: {
+                        data: encodeV8(value),
+                        encoding: 'VE_V8',
+                    }
+                }
+            ],
+        };
+        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
+        if (status !== 'AW_SUCCESS') throw new Error(`set failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+        return { ok: true, versionstamp: encodeHex(versionstamp) };
     }
 
-    delete(key: KvKey): Promise<void> {
-        throw new Error(`implement: RemoteKv.delete(${JSON.stringify({ key })})`);
+    async delete(key: KvKey): Promise<void> {
+        const req: AtomicWrite = {
+            enqueues: [],
+            kvChecks: [],
+            kvMutations: [
+                {
+                    key: packKey(key),
+                    mutationType: 'M_CLEAR',
+                }
+            ],
+        };
+        const res = await this.atomicWrite(req);
+        const { status, primaryIfWriteDisabled } = res;
+        if (status !== 'AW_SUCCESS') throw new Error(`set failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
     }
 
     list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
@@ -114,20 +143,33 @@ class RemoteKv implements Kv {
     }
 
     close(): void {
-        throw new Error(`implement: RemoteKv.close()`);
+        // no persistent resources yet
     }
 
     //
 
-    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
+    private locateEndpoint(consistency: KvConsistencyLevel): EndpointInfo {
         const { metadata } = this;
-        // TODO better endpoint selection
         // TODO refresh metadata if necessary
         const endpoint = consistency === 'strong' ? metadata.endpoints.find(v => v.consistency === 'strong') : metadata.endpoints[0];
         if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
+        return endpoint;
+    }
+
+    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
+        const { metadata } = this;
+        const endpoint = this.locateEndpoint(consistency);
         const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
         const accessToken = metadata.token;
         return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
+    }
+
+    private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
+        const { metadata } = this;
+        const endpoint = this.locateEndpoint('strong');
+        const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
+        const accessToken = metadata.token;
+        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
     }
 
     async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit: limitOpt, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
