@@ -130,8 +130,23 @@ class RemoteKv implements Kv {
         return new RemoteKvListIterator<T>(generator, () => outCursor[0]);
     }
 
-    enqueue(value: unknown, options?: { delay?: number | undefined; keysIfUndelivered?: KvKey[] | undefined; } | undefined): Promise<KvCommitResult> {
-        throw new Error(`implement: RemoteKv.enqueue(${JSON.stringify({ value, options })})`);
+    async enqueue(value: unknown, { delay, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] }  = {}): Promise<KvCommitResult> {
+        if (typeof delay === 'number') throw new Error(`'delay' not supported over KV Connect`);
+        const req: AtomicWrite = {
+            enqueues: [
+                {
+                    backoffSchedule: [], // TODO ???
+                    deadlineMs: '10000', // TODO ???
+                    kvKeysIfUndelivered: keysIfUndelivered.map(packKey),
+                    payload: encodeV8(value),
+                }
+            ],
+            kvChecks: [],
+            kvMutations: [],
+        };
+        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
+        if (status !== 'AW_SUCCESS') throw new Error(`enqueue failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+        return { ok: true, versionstamp: encodeHex(versionstamp) };
     }
 
     listenQueue(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
