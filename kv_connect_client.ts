@@ -1,15 +1,12 @@
-// https://github.com/denoland/deno/tree/main/ext/kv#kv-connect
-// https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
-// https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
-
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
-import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
+import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
+import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvU64 } from './kv_types.ts';
 import { decodeV8, encodeV8 } from './v8.ts';
 
-export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<Kv> {    
-    return await RemoteKv.of(url, { accessToken });
+export async function openKv(url: string, { accessToken, wrapUnknownValues }: { accessToken: string, wrapUnknownValues?: boolean }): Promise<Kv> {    
+    return await RemoteKv.of(url, { accessToken, wrapUnknownValues });
 }
 
 //
