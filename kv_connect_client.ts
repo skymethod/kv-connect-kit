@@ -1,123 +1,152 @@
-
 // https://github.com/denoland/deno/tree/main/ext/kv#kv-connect
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
+import { encodeHex } from './bytes.ts';
+import { SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { DatabaseMetadata, fetchDatabaseMetadata, fetchSnapshotRead, packKey, unpackKey } from './kv_connect_api.ts';
+import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector } from './kv_types.ts';
+import { decodeV8 } from './v8.ts';
 
-import { encodeBinary as encodeAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
-import { encodeBinary as encodeSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
-import { decodeBinary as decodeSnapshotReadOutput } from './gen/messages/datapath/SnapshotReadOutput.ts';
-import { decodeBinary as decodeAtomicWriteOutput } from './gen/messages/datapath/AtomicWriteOutput.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
-import { decodeV8, encodeV8 } from './v8.ts';
-
-export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<unknown> {
-
-    const metadata = await fetchDatabaseMetadata(url, accessToken);
-    const { version, endpoints, token, expiresAt } = metadata;
-    if (version !== 1) throw new Error(`Unsupported version: ${version}`);
-    if (endpoints.length === 0) throw new Error(`No endpoints`);
-    const expiresTime = new Date(expiresAt).getTime();
-    console.log(`Expires in ${expiresTime - Date.now()}ms`);
-
-    const endpointUrl = endpoints[0].url;
-
-    const testRead = false;
-    if (testRead) {
-        const snapshotReadUrl = new URL('/snapshot_read', endpointUrl).toString();
-
-        const encoder = new TextEncoder();
-        const read: SnapshotRead = { ranges: [ 
-            { limit: 10, reverse: false, start: encoder.encode(''), end: encoder.encode('z') }
-
-        ] };
-        const result = await fetchSnapshotRead(snapshotReadUrl, token, metadata.databaseId, read);
-        for (const range of result.ranges) {
-            for (const entry of range.values) {
-                console.log(entry.key);
-                console.log(decodeV8(entry.value));
-                console.log(entry.versionstamp);
-                console.log(entry.encoding);
-            }
-        }
-    }
-    const testWrite = true;
-    if (testWrite) {
-        const atomicWriteUrl = new URL('/atomic_write', endpointUrl).toString();
-
-        const write: AtomicWrite = {
-            enqueues: [
-                {
-                    backoffSchedule: [],
-                    deadlineMs: '10000',
-                    kvKeysIfUndelivered: [],
-                    payload: encodeV8('hi!'),
-                }
-            ],
-            kvChecks: [],
-            kvMutations: [],
-        };
-        const result = await fetchAtomicWrite(atomicWriteUrl, token, metadata.databaseId, write);
-        console.log(result);
-
-    }
-    
-    throw new Error();
-}
-
-export interface DatabaseMetadata {
-    readonly version: number; // 1
-    readonly databaseId: string; // uuid v4
-    readonly endpoints: EndpointInfo[];
-    readonly token: string;
-    readonly expiresAt: string; // 2023-09-17T16:39:10Z
-}
-
-export interface EndpointInfo {
-    readonly url: string; // https://us-east4.txnproxy.deno-gcp.net
-    readonly consistency: string; // strong
+export async function openKv(url: string, { accessToken }: { accessToken: string }): Promise<Kv> {    
+    return await RemoteKv.of(url, { accessToken });
 }
 
 //
 
-async function fetchDatabaseMetadata(url: string, accessToken: string): Promise<DatabaseMetadata> {
-    const res = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } });
-    if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
-    const contentType = res.headers.get('content-type') ?? undefined;
-    if (contentType !== 'application/json') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
-    const metadata = await res.json();
-    if (!isDatabaseMetadata(metadata)) throw new Error(`Bad DatabaseMetadata: ${JSON.stringify(metadata)}`);
-    return metadata;
+class RemoteKv implements Kv {
+
+    private readonly url: string;
+    private readonly accessToken: string;
+
+    private metadata: DatabaseMetadata;
+
+    private constructor(url: string, accessToken: string, metadata: DatabaseMetadata) {
+        this.url = url;
+        this.accessToken = accessToken;
+        this.metadata = metadata;
+    }
+
+    static async of(url: string, { accessToken }: { accessToken: string }) {
+        const metadata = await fetchDatabaseMetadata(url, accessToken);
+        const { version, endpoints, token, expiresAt } = metadata;
+        if (version !== 1) throw new Error(`Unsupported version: ${version}`);
+        if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
+        if (endpoints.length === 0) throw new Error(`No endpoints`);
+        const expiresTime = new Date(expiresAt).getTime();
+        console.log(`Expires in ${expiresTime - Date.now()}ms`);
+        return new RemoteKv(url, accessToken, metadata);
+    }
+
+    get<T = unknown>(key: KvKey, options?: { consistency?: KvConsistencyLevel | undefined; } | undefined): Promise<KvEntryMaybe<T>> {
+        throw new Error(`implement: RemoteKv.get(${JSON.stringify({ key, options })})`);
+    }
+
+    // deno-lint-ignore no-explicit-any
+    getMany<T>(keys: readonly unknown[], options?: { consistency?: KvConsistencyLevel }): Promise<any> {
+        throw new Error(`implement: RemoteKv.getMany(${JSON.stringify({ keys, options })})`);
+    }
+
+    set(key: KvKey, value: unknown, options?: { expireIn?: number | undefined; } | undefined): Promise<KvCommitResult> {
+        throw new Error(`implement: RemoteKv.set(${JSON.stringify({ key, value, options })})`);
+    }
+
+    delete(key: KvKey): Promise<void> {
+        throw new Error(`implement: RemoteKv.delete(${JSON.stringify({ key })})`);
+    }
+
+    list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
+        const outCursor: [ string ] = [ '' ];
+        const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
+        return new RemoteKvListIterator<T>(generator, () => outCursor[0]);
+    }
+
+    enqueue(value: unknown, options?: { delay?: number | undefined; keysIfUndelivered?: KvKey[] | undefined; } | undefined): Promise<KvCommitResult> {
+        throw new Error(`implement: RemoteKv.enqueue(${JSON.stringify({ value, options })})`);
+    }
+
+    listenQueue(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
+        throw new Error(`'listenQueue' is not possible over KV Connect`);
+    }
+
+    atomic(): AtomicOperation {
+        throw new Error(`implement: RemoteKv.atomic()`);
+    }
+
+    close(): void {
+        throw new Error(`implement: RemoteKv.close()`);
+    }
+
+    //
+
+    private async snapshotRead(req: SnapshotRead): Promise<SnapshotReadOutput> {
+        const { metadata } = this;
+        // TODO better endpoint selection
+        // TODO refresh metadata if necessary
+        const endpointUrl = metadata.endpoints[0].url;
+        const snapshotReadUrl = new URL('/snapshot_read', endpointUrl).toString();
+        const accessToken = metadata.token;
+        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
+    }
+
+    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit: limitOpt, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+        const req: SnapshotRead = { ranges: [] };
+        if ('prefix' in selector) {
+            throw new Error(`implement prefix-based`);
+        } else {
+            // TODO do this properly
+            const start = packKey([]);
+            const end = packKey([ 'z' ]);
+            const reverse = reverseOpt ?? false;
+            const limit = Math.min(limitOpt ?? 100, 500);
+            req.ranges.push({ start, end, limit, reverse });
+        }
+
+        const res = await this.snapshotRead(req);
+        for (const range of res.ranges) {
+            for (const entry of range.values) {
+                const key = unpackKey(entry.key);
+                if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
+                const value = decodeV8(entry.value, { wrapUnknownValues: true }) as T;
+                const versionstamp = encodeHex(entry.versionstamp);
+                yield { key, value, versionstamp };
+            }
+           
+        }
+        outCursor[0] = 'TODO';
+    }
+
 }
 
-async function fetchSnapshotRead(url: string, accessToken: string, databaseId: string, read: SnapshotRead): Promise<SnapshotReadOutput> {
-    return decodeSnapshotReadOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeSnapshotRead(read)));
-}
+class RemoteKvListIterator<T> implements KvListIterator<T> {
+    private readonly generator: AsyncGenerator<KvEntry<T>>;
+    private readonly _cursor: () => string;
 
-async function fetchAtomicWrite(url: string, accessToken: string, databaseId: string, write: AtomicWrite): Promise<AtomicWriteOutput> {
-    return decodeAtomicWriteOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeAtomicWrite(write)));
-}
+    constructor(generator: AsyncGenerator<KvEntry<T>>, cursor: () => string) {
+        this.generator = generator;
+        this._cursor = cursor;
+    }
 
-async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array): Promise<Uint8Array> {
-    const res = await fetch(url, { method: 'POST', body, headers: { 'x-transaction-domain-id': databaseId , authorization: `Bearer ${accessToken}` } });
-    if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
-    const contentType = res.headers.get('content-type') ?? undefined;
-    if (contentType !== 'application/x-protobuf') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
-    return new Uint8Array(await res.arrayBuffer());
-}
+    get cursor(): string {
+        return this._cursor();
+    }
 
-function isEndpointInfo(obj: unknown): obj is EndpointInfo {
-    if (!isRecord(obj)) return false;
-    const { url, consistency, ...rest } = obj;
-    return typeof url === 'string' && typeof consistency === 'string' && Object.keys(rest).length === 0;
-}
+    next(): Promise<IteratorResult<KvEntry<T>, undefined>> {
+        return this.generator.next();
+    }
 
-function isDatabaseMetadata(obj: unknown): obj is DatabaseMetadata {
-    if (!isRecord(obj)) return false;
-    const { version, databaseId, endpoints, token, expiresAt, ...rest } = obj;
-    return typeof version === 'number' && typeof databaseId === 'string' && Array.isArray(endpoints) && endpoints.every(isEndpointInfo) && typeof token === 'string' && typeof expiresAt === 'string' && Object.keys(rest).length === 0;
-}
+    [Symbol.asyncIterator](): AsyncIterableIterator<KvEntry<T>> {
+        return this.generator[Symbol.asyncIterator]();
+    }
 
-function isRecord(obj: unknown): obj is Record<string, unknown> {
-    return typeof obj === 'object' && obj !== null && !Array.isArray(obj) && obj.constructor === Object;
+    // deno-lint-ignore no-explicit-any
+    return?(value?: any): Promise<IteratorResult<KvEntry<T>, any>> {
+        return this.generator.return(value);
+    }
+
+    // deno-lint-ignore no-explicit-any
+    throw?(e?: any): Promise<IteratorResult<KvEntry<T>, any>> {
+        return this.generator.throw(e);
+    }
+
 }
