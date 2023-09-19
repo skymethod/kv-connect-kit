@@ -21,6 +21,15 @@ export function equalBytes(lhs: Uint8Array, rhs: Uint8Array) {
     return true;
 }
 
+export function computeBigintMinimumNumberOfBytes(val: bigint): number {
+    let n = 0;
+    while (val !== 0n) {
+        val >>= 8n;
+        n++;
+    }
+    return n;
+}
+
 //
 
 const decoder = new TextDecoder();

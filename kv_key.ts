@@ -1,4 +1,4 @@
-import { checkEnd } from './bytes.ts';
+import { computeBigintMinimumNumberOfBytes, checkEnd } from './bytes.ts';
 import { KvKey, KvKeyPart } from './kv_types.ts';
 
 // https://github.com/apple/foundationdb/blob/main/design/tuple.md
@@ -23,19 +23,15 @@ export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
     if (kvKeyPart === 0n) return new Uint8Array([ Typecode.IntegerZero ]);
     if (typeof kvKeyPart === 'bigint' && kvKeyPart < 0) return new Uint8Array([ 19, 0xff - Number(-kvKeyPart) ]);
     if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0) {
-        for (let numBytes = 1n; numBytes <= 9n; numBytes++) {
-            const maxValue = Math.pow(2, 8 * Number(numBytes)) - 1;
-            if (kvKeyPart <= maxValue) {
-                const bytes: number[] = [];
-                if (numBytes === 9n) bytes.push(9);
-                for (let i = 0n; i < numBytes; i++) {
-                    const mask = 0xffn << 8n * (numBytes - i - 1n);
-                    const byteN = (kvKeyPart & mask) >> (8n * (numBytes - i - 1n));
-                    bytes.push(Number(byteN));
-                }
-                return new Uint8Array([ Typecode.IntegerOneBytePositive + Number(numBytes) - 1, ...bytes ]);
-            }
+        const numBytes = BigInt(computeBigintMinimumNumberOfBytes(kvKeyPart));
+        const bytes: number[] = [];
+        if (numBytes > 8n) bytes.push(Number(numBytes));
+        for (let i = 0n; i < numBytes; i++) {
+            const mask = 0xffn << 8n * (numBytes - i - 1n);
+            const byte = (kvKeyPart & mask) >> (8n * (numBytes - i - 1n));
+            bytes.push(Number(byte));
         }
+        return new Uint8Array([ numBytes <= 8n ? (Typecode.IntegerOneBytePositive + Number(numBytes) - 1) : Typecode.IntegerArbitraryBytePositive, ...bytes ]);
     }
     throw new Error(`implement keyPart: ${typeof kvKeyPart} ${kvKeyPart}`);
 }
@@ -66,11 +62,11 @@ export function unpackKey(bytes: Uint8Array): KvKey {
             // bigint 0
             rt.push(0n);
         } else if (typecode >= Typecode.IntegerOneBytePositive && typecode <= Typecode.IntegerArbitraryBytePositive) {
-            const numBytes = BigInt(typecode === Typecode.IntegerArbitraryBytePositive ? bytes[pos++] : typecode - Typecode.IntegerOneBytePositive + 1);
+            const numBytes = BigInt(typecode === Typecode.IntegerArbitraryBytePositive ? bytes[pos++] : (typecode - Typecode.IntegerOneBytePositive + 1));
             let val = 0n;
             for (let i = 0n; i < numBytes; i++) {
                 const byte = BigInt(bytes[pos++]);
-                val += (byte << ((numBytes - i - 1n) * 8n))
+                val += (byte << ((numBytes - i - 1n) * 8n));
             }
             rt.push(val);
         } else if (typecode === 33) {
