@@ -282,7 +282,7 @@ class RemoteKv implements Kv {
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
     }
 
-    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { wrapUnknownValues } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
@@ -303,9 +303,13 @@ class RemoteKv implements Kv {
                 start = packKey(selector.start);
                 end = packKey(selector.end);
             }
-            start = lastYieldedKeyBytes ?? start;
+            if (reverse) {
+                end = lastYieldedKeyBytes ?? end;
+            } else {
+                start = lastYieldedKeyBytes ?? start;
+            }
+           
             if (start === undefined || end === undefined) throw new Error();
-            const reverse = reverseOpt ?? false;
             const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
             req.ranges.push({ start, end, limit: batchLimit, reverse });
 
