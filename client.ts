@@ -2,6 +2,7 @@ import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
 import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
+import { encode as encodeBase64, decode as decodeBase64 } from './gen/runtime/base64.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
@@ -265,11 +266,12 @@ class RemoteKv implements Kv {
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
     }
 
-    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { wrapUnknownValues } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
-        let lastYieldedKeyBytes: Uint8Array | undefined;
+        const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
+        let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
         while (true) {
             const req: SnapshotRead = { ranges: [] };
             if ('prefix' in selector) {
@@ -291,18 +293,34 @@ class RemoteKv implements Kv {
                     if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
                     const value = decodeV8(entry.value, { wrapUnknownValues }) as T;
                     const versionstamp = encodeHex(entry.versionstamp);
+                    lastYieldedKeyBytes = entry.key;
+                    outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield
                     yield { key, value, versionstamp };
                     yielded++;
                     entries++;
                     // console.log({ yielded, entries, limit });
                     if (typeof limit === 'number' && yielded >= limit) return;
-                    lastYieldedKeyBytes = entry.key;
                 }
             }
             if (entries === 0) return;
-            outCursor[0] = 'TODO';
         }
     }
+}
+
+type Cursor = { lastYieldedKeyBytes: Uint8Array }
+
+function packCursor({ lastYieldedKeyBytes }: Cursor): string {
+    return encodeBase64(JSON.stringify({ lastYieldedKeyBytes: encodeHex(lastYieldedKeyBytes) }));
+}
+
+function unpackCursor(str: string): Cursor {
+    try {
+        const { lastYieldedKeyBytes } = JSON.parse(new TextDecoder().decode(decodeBase64(str)));
+        if (typeof lastYieldedKeyBytes === 'string') return { lastYieldedKeyBytes: decodeHex(lastYieldedKeyBytes) };
+    } catch {
+        // noop
+    }
+    throw new Error(`Invalid cursor`);
 }
 
 class RemoteKvListIterator<T> implements KvListIterator<T> {
