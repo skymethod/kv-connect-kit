@@ -6,12 +6,36 @@ import { encode as encodeBase64, decode as decodeBase64 } from './proto/runtime/
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
-import { decodeV8, encodeV8 } from './v8.ts';
+import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 import { isRecord } from './check.ts';
+export { UnknownV8 } from './v8.ts';
 
-export function newRemoteService({ accessToken, wrapUnknownValues, debug }: { accessToken: string, wrapUnknownValues?: boolean, debug?: boolean }): KvService {
+type EncodeV8 = (value: unknown) => Uint8Array;
+type DecodeV8 = (bytes: Uint8Array) => unknown;
+
+export interface RemoteServiceOptions {
+    /** Access token used to authenticate to the remote service */
+    readonly accessToken: string;
+
+    /** Wrap unsupported V8 payloads to instances of UnknownV8 instead of failing.  Only applicable when using the default serializer. */
+    readonly wrapUnknownValues?: boolean;
+
+    /** Enable some console logging */
+    readonly debug?: boolean;
+
+    /** Custom serializer to use when serializing v8-encoded KV values. e.g. the 'serialize' method in Node's 'v8' module. */
+    readonly encodeV8?: EncodeV8;
+
+    /** Custom deserializer to use when deserializing v8-encoded KV values. e.g. the 'deserialize' method in Node's 'v8' module. */
+    readonly decodeV8?: DecodeV8;
+}
+
+/**
+ * Creates a new KvService instance that can be used to open a remote KV database.
+ */
+export function newRemoteService(opts: RemoteServiceOptions): KvService {
     return {
-        openKv: async (url) => await RemoteKv.of(url, { accessToken, wrapUnknownValues, debug }),
+        openKv: async (url) => await RemoteKv.of(url, opts),
         newU64: value => new RemoteKvU64(value),
     }
 }
@@ -50,7 +74,7 @@ function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheck {
     }
 }
 
-function computeKvMutationMessage(mut: KvMutation): KvMutationMessage {
+function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutationMessage {
     const { key, type } = mut;
     return {
         key: packKey(key),
@@ -59,7 +83,7 @@ function computeKvMutationMessage(mut: KvMutation): KvMutationMessage {
     }
 }
 
-function computeEnqueueMessage(value: unknown, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): Enqueue {
+function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): Enqueue {
     return {
         backoffSchedule: [ 100, 200, 400, 800 ],
         deadlineMs: `${Date.now() + delay}`,
@@ -116,29 +140,30 @@ class RemoteKv implements Kv {
 
     private readonly url: string;
     private readonly accessToken: string;
-    private readonly wrapUnknownValues: boolean;
     private readonly debug: boolean;
+    private readonly encodeV8: EncodeV8;
+    private readonly decodeV8: DecodeV8
 
     private metadata: DatabaseMetadata;
 
-    private constructor(url: string, accessToken: string, wrapUnknownValues: boolean, debug: boolean, metadata: DatabaseMetadata) {
+    private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, metadata: DatabaseMetadata) {
         this.url = url;
         this.accessToken = accessToken;
-        this.wrapUnknownValues = wrapUnknownValues;
         this.debug = debug;
+        this.encodeV8 = encodeV8;
+        this.decodeV8 = decodeV8;
         this.metadata = metadata;
     }
 
-    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false, debug = false }: { accessToken: string, wrapUnknownValues?: boolean, debug?: boolean }) {
+    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false, debug = false, encodeV8 = _encodeV8, decodeV8 }: RemoteServiceOptions) {
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
-        return new RemoteKv(url, accessToken, wrapUnknownValues, debug, metadata);
+        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues })), metadata);
     }
-
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
         checkKeyNotEmpty(key);
-        const { wrapUnknownValues } = this;
+        const { decodeV8 } = this;
         const packedKey = packKey(key);
         const req: SnapshotRead = {
             ranges: [ computeReadRangeForKey(packedKey) ]
@@ -146,7 +171,7 @@ class RemoteKv implements Kv {
         const res = await this.snapshotRead(req, consistency);
         for (const range of res.ranges) {
             for (const item of range.values) {
-                if (equalBytes(item.key, packedKey)) return { key, value: decodeV8(item.value, { wrapUnknownValues }) as T, versionstamp: encodeHex(item.versionstamp) };
+                if (equalBytes(item.key, packedKey)) return { key, value: decodeV8(item.value) as T, versionstamp: encodeHex(item.versionstamp) };
             }
         }
         return { key, value: null, versionstamp: null };
@@ -154,7 +179,7 @@ class RemoteKv implements Kv {
 
     // deno-lint-ignore no-explicit-any
     async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
-        const { wrapUnknownValues } = this;
+        const { decodeV8 } = this;
         keys.forEach(checkKeyNotEmpty);
         const packedKeys = keys.map(packKey);
         const packedKeysHex = packedKeys.map(encodeHex);
@@ -167,7 +192,7 @@ class RemoteKv implements Kv {
             for (const item of range.values) {
                 const itemKeyHex = encodeHex(item.key);
                 const i = packedKeysHex.indexOf(itemKeyHex);
-                if (i >= 0) rt[i] = { key: keys[i], value: decodeV8(item.value, { wrapUnknownValues }) as T, versionstamp: encodeHex(item.versionstamp) };
+                if (i >= 0) rt[i] = { key: keys[i], value: decodeV8(item.value) as T, versionstamp: encodeHex(item.versionstamp) };
             }
         }
         return rt;
@@ -176,6 +201,7 @@ class RemoteKv implements Kv {
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
         checkExpireIn(expireIn);
         checkKeyNotEmpty(key);
+        const { encodeV8 } = this;
         const req: AtomicWrite = {
             enqueues: [],
             kvChecks: [],
@@ -219,9 +245,10 @@ class RemoteKv implements Kv {
     }
 
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
+        const { encodeV8 } = this;
         const req: AtomicWrite = {
             enqueues: [
-                computeEnqueueMessage(value, opts),
+                computeEnqueueMessage(value, encodeV8, opts),
             ],
             kvChecks: [],
             kvMutations: [],
@@ -237,7 +264,7 @@ class RemoteKv implements Kv {
 
     atomic(): AtomicOperation {
         let commitCalled = false;
-        return new RemoteAtomicOperation(async req => {
+        return new RemoteAtomicOperation(this.encodeV8, async req => {
             if (commitCalled) throw new Error(`'commit' already called for this atomic`);
             const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
             commitCalled = true;
@@ -285,7 +312,7 @@ class RemoteKv implements Kv {
     }
 
     async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
-        const { wrapUnknownValues } = this;
+        const { decodeV8 } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
         const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
@@ -322,7 +349,7 @@ class RemoteKv implements Kv {
                     if (entries === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
                     const key = unpackKey(entry.key);
                     if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
-                    const value = decodeV8(entry.value, { wrapUnknownValues }) as T;
+                    const value = decodeV8(entry.value) as T;
                     const versionstamp = encodeHex(entry.versionstamp);
                     lastYieldedKeyBytes = entry.key;
                     outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield
@@ -382,10 +409,12 @@ class RemoteKvU64 implements KvU64 {
 
 class RemoteAtomicOperation implements AtomicOperation {
 
+    private readonly encodeV8: EncodeV8;
     private readonly _commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>;
     private readonly write: AtomicWrite = { enqueues: [], kvChecks: [], kvMutations: [] };
 
-    constructor(commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>) {
+    constructor(encodeV8: EncodeV8, commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>) {
+        this.encodeV8 = encodeV8;
         this._commit = commit;
     }
 
@@ -396,7 +425,7 @@ class RemoteAtomicOperation implements AtomicOperation {
 
     mutate(...mutations: KvMutation[]): this {
         mutations.map(v => v.key).forEach(checkKeyNotEmpty);
-        this.write.kvMutations.push(...mutations.map(computeKvMutationMessage));
+        this.write.kvMutations.push(...mutations.map(v => computeKvMutationMessage(v, this.encodeV8)));
         return this;
     }
 
@@ -427,7 +456,7 @@ class RemoteAtomicOperation implements AtomicOperation {
     }
 
     enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): this {
-        this.write.enqueues.push(computeEnqueueMessage(value, opts));
+        this.write.enqueues.push(computeEnqueueMessage(value, this.encodeV8, opts));
         return this;
     }
 
