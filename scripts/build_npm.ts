@@ -12,7 +12,9 @@ await build({
         // none!
     },
     compilerOptions: {
-        lib: [ 'ESNext', 'DOM','DOM.Iterable' ],
+        // let's try to support Node 14+
+        lib: [ 'ES2020', 'DOM','DOM.Iterable' ],
+        target: 'ES2020',
     },
     package: {
         // package.json properties

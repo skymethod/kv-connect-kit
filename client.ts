@@ -7,6 +7,7 @@ import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { decodeV8, encodeV8 } from './v8.ts';
+import { isRecord } from './check.ts';
 
 export function newRemoteService({ accessToken, wrapUnknownValues, debug }: { accessToken: string, wrapUnknownValues?: boolean, debug?: boolean }): KvService {
     return {
@@ -211,6 +212,7 @@ class RemoteKv implements Kv {
     }
 
     list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
+        if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new RemoteKvListIterator<T>(generator, () => outCursor[0]);
@@ -257,8 +259,8 @@ class RemoteKv implements Kv {
             this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
         }
         const { metadata } = this;
-        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong').at(0);
-        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong').at(0);
+        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
+        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
         const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
         if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
         return endpoint;

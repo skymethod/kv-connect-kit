@@ -33,7 +33,7 @@ export function decodeV8(bytes: Uint8Array, { wrapUnknownValues = false }: { wra
     } else if (wrapUnknownValues) {
         return new UnknownV8(bytes);
     } else {
-        throw new Error(`decode error: Unsupported tag ${tag} ('${String.fromCharCode(tag)}') at ${pos} in [${bytes.join(', ')}]`);
+        throw new Error(`decodeV8 error: Unsupported tag ${tag} ('${String.fromCharCode(tag)}') at ${pos} in [${bytes.join(', ')}]`);
     }
 }
 
@@ -58,7 +58,7 @@ export function encodeV8(value: unknown): Uint8Array {
     } else if (value === undefined) {
         return new Uint8Array([ SerializationTag.kVersion, kLatestVersion, SerializationTag.kUndefined ]);
     }
-    throw new Error(`decode error: Unsupported value ${JSON.stringify(value)}`);
+    throw new Error(`encodeV8 error: Unsupported value ${JSON.stringify(value)}`);
 }
 
 //

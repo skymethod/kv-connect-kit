@@ -3,6 +3,7 @@ import { encodeBinary as encodeSnapshotRead } from './proto/messages/datapath/Sn
 import { decodeBinary as decodeSnapshotReadOutput } from './proto/messages/datapath/SnapshotReadOutput.ts';
 import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/datapath/AtomicWriteOutput.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
+import { isRecord } from './check.ts';
 
 // https://github.com/denoland/deno/tree/main/ext/kv#kv-connect
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
@@ -46,10 +47,6 @@ function isDatabaseMetadata(obj: unknown): obj is DatabaseMetadata {
     if (!isRecord(obj)) return false;
     const { version, databaseId, endpoints, token, expiresAt, ...rest } = obj;
     return typeof version === 'number' && typeof databaseId === 'string' && Array.isArray(endpoints) && endpoints.every(isEndpointInfo) && typeof token === 'string' && typeof expiresAt === 'string' && Object.keys(rest).length === 0;
-}
-
-function isRecord(obj: unknown): obj is Record<string, unknown> {
-    return typeof obj === 'object' && obj !== null && !Array.isArray(obj) && obj.constructor === Object;
 }
 
 //
