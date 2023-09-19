@@ -4,6 +4,8 @@ import { KvKey, KvKeyPart } from './kv_types.ts';
 // https://github.com/apple/foundationdb/blob/main/design/tuple.md
 // limited to Uint8Array | string | number | bigint | boolean
 
+// https://github.com/denoland/deno/blob/main/ext/kv/codec.rs
+
 export function packKey(kvKey: KvKey): Uint8Array {
     return new Uint8Array(kvKey.flatMap(v => [...packKeyPart(v)]));
 }
@@ -21,10 +23,11 @@ export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
     if (kvKeyPart === 0n) return new Uint8Array([ Typecode.IntegerZero ]);
     if (typeof kvKeyPart === 'bigint' && kvKeyPart < 0) return new Uint8Array([ 19, 0xff - Number(-kvKeyPart) ]);
     if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0) {
-        for (let numBytes = 1n; numBytes <= 5n; numBytes++) {
+        for (let numBytes = 1n; numBytes <= 9n; numBytes++) {
             const maxValue = Math.pow(2, 8 * Number(numBytes)) - 1;
             if (kvKeyPart <= maxValue) {
                 const bytes: number[] = [];
+                if (numBytes === 9n) bytes.push(9);
                 for (let i = 0n; i < numBytes; i++) {
                     const mask = 0xffn << 8n * (numBytes - i - 1n);
                     const byteN = (kvKeyPart & mask) >> (8n * (numBytes - i - 1n));
@@ -62,8 +65,8 @@ export function unpackKey(bytes: Uint8Array): KvKey {
         } else if (typecode === Typecode.IntegerZero) {
             // bigint 0
             rt.push(0n);
-        } else if (typecode >= Typecode.IntegerOneBytePositive && typecode <= Typecode.IntegerFiveBytePositive) {
-            const numBytes = BigInt(typecode - Typecode.IntegerOneBytePositive + 1);
+        } else if (typecode >= Typecode.IntegerOneBytePositive && typecode <= Typecode.IntegerArbitraryBytePositive) {
+            const numBytes = BigInt(typecode === Typecode.IntegerArbitraryBytePositive ? bytes[pos++] : typecode - Typecode.IntegerOneBytePositive + 1);
             let val = 0n;
             for (let i = 0n; i < numBytes; i++) {
                 const byte = BigInt(bytes[pos++]);
@@ -106,6 +109,10 @@ const enum Typecode {
     IntegerThreeBytePositive = 0x17,
     IntegerFourBytePositive = 0x18,
     IntegerFiveBytePositive = 0x19,
+    IntegerSixBytePositive = 0x1a,
+    IntegerSevenBytePositive = 0x1b,
+    IntegerEightBytePositive = 0x1c,
+    IntegerArbitraryBytePositive = 0x1d,
     False = 0x26,
     True = 0x27,
 }
