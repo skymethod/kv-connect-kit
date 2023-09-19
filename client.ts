@@ -1,8 +1,8 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
-import { encodeJson as encodeJsonAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
-import { encodeJson as encodeJsonSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
-import { encode as encodeBase64, decode as decodeBase64 } from './gen/runtime/base64.ts';
+import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
+import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
+import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './proto/messages/datapath/index.ts';
+import { encode as encodeBase64, decode as decodeBase64 } from './proto/runtime/base64.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';

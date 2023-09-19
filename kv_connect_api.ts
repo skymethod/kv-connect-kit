@@ -1,8 +1,8 @@
-import { encodeBinary as encodeAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
-import { encodeBinary as encodeSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
-import { decodeBinary as decodeSnapshotReadOutput } from './gen/messages/datapath/SnapshotReadOutput.ts';
-import { decodeBinary as decodeAtomicWriteOutput } from './gen/messages/datapath/AtomicWriteOutput.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './gen/messages/datapath/index.ts';
+import { encodeBinary as encodeAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
+import { encodeBinary as encodeSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
+import { decodeBinary as decodeSnapshotReadOutput } from './proto/messages/datapath/SnapshotReadOutput.ts';
+import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/datapath/AtomicWriteOutput.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
 
 // https://github.com/denoland/deno/tree/main/ext/kv#kv-connect
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
