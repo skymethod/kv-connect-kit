@@ -1,3 +1,25 @@
+export interface KvService {
+    /** Open a new {@linkcode Deno.Kv} connection to persist data.
+     *
+     * When a path is provided, the database will be persisted to disk at that
+     * path. Read and write access to the file is required.
+     *
+     * When no path is provided, the database will be opened in a default path for
+     * the current script. This location is persistent across script runs and is
+     * keyed on the origin storage key (the same key that is used to determine
+     * `localStorage` persistence). More information about the origin storage key
+     * can be found in the Deno Manual.
+     *
+     * @tags allow-read, allow-write
+     * @category KV
+     */
+    openKv(path?: string): Promise<Kv>;
+
+    /** Create a new `KvU64` instance from the given bigint value. If the value
+     * is signed or greater than 64-bits, an error will be thrown. */
+    newU64(value: bigint): KvU64;
+}
+
 export interface Kv {
     /**
      * Retrieve the value and versionstamp for the given key from the database
@@ -578,9 +600,6 @@ export type KvMutation =
 * @category KV
 */
 export interface KvU64 {
-    /** Create a new `KvU64` instance from the given bigint value. If the value
-     * is signed or greater than 64-bits, an error will be thrown. */
-    // constructor(value: bigint);
     /** The value of this unsigned 64-bit integer, represented as a bigint. */
     readonly value: bigint;
 }

@@ -2,11 +2,14 @@ import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvU64 } from './kv_types.ts';
+import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { decodeV8, encodeV8 } from './v8.ts';
 
-export async function openKv(url: string, { accessToken, wrapUnknownValues }: { accessToken: string, wrapUnknownValues?: boolean }): Promise<Kv> {    
-    return await RemoteKv.of(url, { accessToken, wrapUnknownValues });
+export function newRemoteService({ accessToken, wrapUnknownValues }: { accessToken: string, wrapUnknownValues?: boolean }): KvService {
+    return {
+        openKv: async (url) => await RemoteKv.of(url, { accessToken, wrapUnknownValues }),
+        newU64: value => new RemoteKvU64(value),
+    }
 }
 
 //
@@ -70,6 +73,15 @@ function checkExpireIn(expireIn: number | undefined): void {
     if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`); // https://github.com/denoland/deno/issues/20560
 }
 
+function isValidHttpUrl(url: string): boolean {
+    try {
+        const { protocol } = new URL(url);
+        return protocol === 'http:' || protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
 //
 
 class RemoteKv implements Kv {
@@ -87,7 +99,8 @@ class RemoteKv implements Kv {
         this.metadata = metadata;
     }
 
-    static async of(url: string, { accessToken, wrapUnknownValues = false }: { accessToken: string, wrapUnknownValues?: boolean }) {
+    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false }: { accessToken: string, wrapUnknownValues?: boolean }) {
+        if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken);
         return new RemoteKv(url, accessToken, wrapUnknownValues, metadata);
     }
