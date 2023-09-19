@@ -17,6 +17,22 @@ export function newRemoteService({ accessToken, wrapUnknownValues, debug }: { ac
 
 //
 
+type Cursor = { lastYieldedKeyBytes: Uint8Array }
+
+function packCursor({ lastYieldedKeyBytes }: Cursor): string {
+    return encodeBase64(JSON.stringify({ lastYieldedKeyBytes: encodeHex(lastYieldedKeyBytes) }));
+}
+
+function unpackCursor(str: string): Cursor {
+    try {
+        const { lastYieldedKeyBytes } = JSON.parse(new TextDecoder().decode(decodeBase64(str)));
+        if (typeof lastYieldedKeyBytes === 'string') return { lastYieldedKeyBytes: decodeHex(lastYieldedKeyBytes) };
+    } catch {
+        // noop
+    }
+    throw new Error(`Invalid cursor`);
+}
+
 function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
     return {
         start: packedKey,
@@ -272,17 +288,26 @@ class RemoteKv implements Kv {
         if (typeof limit === 'number' && yielded >= limit) return;
         const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
         let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
+        let pass = 0;
         while (true) {
+            pass++;
+            // console.log({ pass });
             const req: SnapshotRead = { ranges: [] };
+            let start: Uint8Array | undefined;
+            let end: Uint8Array | undefined;
             if ('prefix' in selector) {
-                throw new Error(`implement prefix-based`);
+                const prefix = packKey(selector.prefix);
+                start = 'start' in selector ? packKey(selector.start) : prefix;
+                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefix, 0xff ]);
             } else {
-                const start = lastYieldedKeyBytes ?? packKey(selector.start);
-                const end = packKey(selector.end);
-                const reverse = reverseOpt ?? false;
-                const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
-                req.ranges.push({ start, end, limit: batchLimit, reverse });
+                start = packKey(selector.start);
+                end = packKey(selector.end);
             }
+            start = lastYieldedKeyBytes ?? start;
+            if (start === undefined || end === undefined) throw new Error();
+            const reverse = reverseOpt ?? false;
+            const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
+            req.ranges.push({ start, end, limit: batchLimit, reverse });
 
             const res = await this.snapshotRead(req, consistency);
             let entries = 0;
@@ -305,22 +330,6 @@ class RemoteKv implements Kv {
             if (entries === 0) return;
         }
     }
-}
-
-type Cursor = { lastYieldedKeyBytes: Uint8Array }
-
-function packCursor({ lastYieldedKeyBytes }: Cursor): string {
-    return encodeBase64(JSON.stringify({ lastYieldedKeyBytes: encodeHex(lastYieldedKeyBytes) }));
-}
-
-function unpackCursor(str: string): Cursor {
-    try {
-        const { lastYieldedKeyBytes } = JSON.parse(new TextDecoder().decode(decodeBase64(str)));
-        if (typeof lastYieldedKeyBytes === 'string') return { lastYieldedKeyBytes: decodeHex(lastYieldedKeyBytes) };
-    } catch {
-        // noop
-    }
-    throw new Error(`Invalid cursor`);
 }
 
 class RemoteKvListIterator<T> implements KvListIterator<T> {
