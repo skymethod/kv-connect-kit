@@ -20,29 +20,21 @@ export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
     if (kvKeyPart === true) return new Uint8Array([ Typecode.True ]);
     if (kvKeyPart === 0n) return new Uint8Array([ Typecode.IntegerZero ]);
     if (typeof kvKeyPart === 'bigint' && kvKeyPart < 0) return new Uint8Array([ 19, 0xff - Number(-kvKeyPart) ]);
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0 && kvKeyPart <= 0xff) return new Uint8Array([ Typecode.IntegerOneBytePositive, Number(kvKeyPart) ]);
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0 && kvKeyPart <= 0xffff) {
-        const n = Number(kvKeyPart);
-        const byte1 = (n & 0xff00) >> 8;
-        const byte2 = n & 0x00ff;
-        return new Uint8Array([ Typecode.IntegerTwoBytePositive, byte1, byte2 ]);
+    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0) {
+        for (let numBytes = 1n; numBytes <= 5n; numBytes++) {
+            const maxValue = Math.pow(2, 8 * Number(numBytes)) - 1;
+            if (kvKeyPart <= maxValue) {
+                const bytes: number[] = [];
+                for (let i = 0n; i < numBytes; i++) {
+                    const mask = 0xffn << 8n * (numBytes - i - 1n);
+                    const byteN = (kvKeyPart & mask) >> (8n * (numBytes - i - 1n));
+                    bytes.push(Number(byteN));
+                }
+                return new Uint8Array([ Typecode.IntegerOneBytePositive + Number(numBytes) - 1, ...bytes ]);
+            }
+        }
     }
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0 && kvKeyPart <= 0xffffff) {
-        const n = Number(kvKeyPart);
-        const byte1 = (n & 0xff0000) >> 16;
-        const byte2 = (n & 0x00ff00) >> 8;
-        const byte3 = n & 0x0000ff;
-        return new Uint8Array([ Typecode.IntegerThreeBytePositive, byte1, byte2, byte3 ]);
-    }
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0 && kvKeyPart <= 0xffffffff) {
-        const n = Number(kvKeyPart);
-        const byte1 = (n & 0xff000000) >> 24;
-        const byte2 = (n & 0x00ff0000) >> 16;
-        const byte3 = (n & 0x0000ff00) >> 8;
-        const byte4 = n & 0x000000ff;
-        return new Uint8Array([ Typecode.IntegerFourBytePositive, byte1, byte2, byte3, byte4 ]);
-    }
-    throw new Error(`implement keyPart: ${JSON.stringify(kvKeyPart)}`);
+    throw new Error(`implement keyPart: ${typeof kvKeyPart} ${kvKeyPart}`);
 }
 
 export function unpackKey(bytes: Uint8Array): KvKey {
@@ -70,30 +62,14 @@ export function unpackKey(bytes: Uint8Array): KvKey {
         } else if (typecode === Typecode.IntegerZero) {
             // bigint 0
             rt.push(0n);
-        } else if (typecode === Typecode.IntegerOneBytePositive) {
-            // bigint > 0 <= 0xff
-            const val = bytes[pos++];
-            rt.push(BigInt(val));
-        } else if (typecode === Typecode.IntegerTwoBytePositive) {
-            // bigint > 0xff <= 0xffff
-            const byte1 = bytes[pos++];
-            const byte2 = bytes[pos++];
-            rt.push(BigInt((byte1 << 8) + byte2));
-        } else if (typecode === Typecode.IntegerThreeBytePositive) {
-            // bigint > 0xffff <= 0xffffff
-            const byte1 = bytes[pos++];
-            const byte2 = bytes[pos++];
-            const byte3 = bytes[pos++];
-            const n = (byte1 << 16) + (byte2 << 8) + byte3;
-            rt.push(BigInt(n));
-        } else if (typecode === Typecode.IntegerFourBytePositive) {
-            // bigint > 0xffffff <= 0xffffffff
-            const byte1 = bytes[pos++];
-            const byte2 = bytes[pos++];
-            const byte3 = bytes[pos++];
-            const byte4 = bytes[pos++];
-            const n = (byte1 << 24) + (byte2 << 16) + (byte3 << 8) + byte4;
-            rt.push(BigInt(n));
+        } else if (typecode >= Typecode.IntegerOneBytePositive && typecode <= Typecode.IntegerFiveBytePositive) {
+            const numBytes = BigInt(typecode - Typecode.IntegerOneBytePositive + 1);
+            let val = 0n;
+            for (let i = 0n; i < numBytes; i++) {
+                const byte = BigInt(bytes[pos++]);
+                val += (byte << ((numBytes - i - 1n) * 8n))
+            }
+            rt.push(val);
         } else if (typecode === 33) {
             // number
             // [ 192, 105, 0, 0, 0, 0, 0, 0] => 200
@@ -129,6 +105,7 @@ const enum Typecode {
     IntegerTwoBytePositive = 0x16,
     IntegerThreeBytePositive = 0x17,
     IntegerFourBytePositive = 0x18,
+    IntegerFiveBytePositive = 0x19,
     False = 0x26,
     True = 0x27,
 }
