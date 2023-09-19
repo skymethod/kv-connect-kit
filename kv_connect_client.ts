@@ -62,6 +62,14 @@ function computeExpiresInMillis({ expiresAt }: DatabaseMetadata): number {
     return expiresTime - Date.now();
 }
 
+function checkKeyNotEmpty(key: KvKey): void {
+    if (key.length === 0) throw new Error(`Key cannot be empty`);
+}
+
+function checkExpireIn(expireIn: number | undefined): void {
+    if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`); // https://github.com/denoland/deno/issues/20560
+}
+
 //
 
 class RemoteKv implements Kv {
@@ -86,6 +94,7 @@ class RemoteKv implements Kv {
 
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+        checkKeyNotEmpty(key);
         const { wrapUnknownValues } = this;
         const packedKey = packKey(key);
         const req: SnapshotRead = {
@@ -103,6 +112,7 @@ class RemoteKv implements Kv {
     // deno-lint-ignore no-explicit-any
     async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
         const { wrapUnknownValues } = this;
+        keys.forEach(checkKeyNotEmpty);
         const packedKeys = keys.map(packKey);
         const packedKeysHex = packedKeys.map(encodeHex);
         const rt: KvEntryMaybe<T>[] = keys.map(v => ({ key: v, value: null, versionstamp: null }));
@@ -121,7 +131,8 @@ class RemoteKv implements Kv {
     }
 
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
-        if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`);
+        checkExpireIn(expireIn);
+        checkKeyNotEmpty(key);
         const req: AtomicWrite = {
             enqueues: [],
             kvChecks: [],
@@ -313,28 +324,34 @@ class RemoteAtomicOperation implements AtomicOperation {
     }
 
     mutate(...mutations: KvMutation[]): this {
+        mutations.map(v => v.key).forEach(checkKeyNotEmpty);
         this.write.kvMutations.push(...mutations.map(computeKvMutationMessage));
         return this;
     }
 
     sum(key: KvKey, n: bigint): this {
+        checkKeyNotEmpty(key);
         return this.mutate({ type: 'sum', key, value: new RemoteKvU64(n) });
     }
 
     min(key: KvKey, n: bigint): this {
+        checkKeyNotEmpty(key);
         return this.mutate({ type: 'min', key, value: new RemoteKvU64(n) });
     }
 
     max(key: KvKey, n: bigint): this {
+        checkKeyNotEmpty(key);
         return this.mutate({ type: 'max', key, value: new RemoteKvU64(n) });
     }
 
     set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
-        if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`);
+        checkExpireIn(expireIn);
+        checkKeyNotEmpty(key);
         return this.mutate({ type: 'set', key, value });
     }
 
     delete(key: KvKey): this {
+        checkKeyNotEmpty(key);
         return this.mutate({ type: 'delete', key });
     }
 

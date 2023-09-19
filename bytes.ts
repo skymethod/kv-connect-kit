@@ -13,12 +13,18 @@ export function decodeHex(str: string): Uint8Array {
     return _decodeHex(new TextEncoder().encode(str));
 }
 
-export function equalBytes(lhs: Uint8Array, rhs: Uint8Array) {
+export function equalBytes(lhs: Uint8Array, rhs: Uint8Array): boolean {
     if (lhs.length !== rhs.length) return false;
     for (let i = 0; i < lhs.length; i++) {
         if (lhs[i] !== rhs[i]) return false;
     }
     return true;
+}
+
+export function flipBytes(arr: Uint8Array | number[], start = 0): void {
+    for (let i = start; i < arr.length; i++) {
+        arr[i] = 0xff - arr[i];
+    }
 }
 
 export function computeBigintMinimumNumberOfBytes(val: bigint): number {

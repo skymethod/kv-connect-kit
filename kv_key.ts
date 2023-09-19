@@ -1,4 +1,4 @@
-import { computeBigintMinimumNumberOfBytes, checkEnd } from './bytes.ts';
+import { computeBigintMinimumNumberOfBytes, checkEnd, flipBytes } from './bytes.ts';
 import { KvKey, KvKeyPart } from './kv_types.ts';
 
 // https://github.com/apple/foundationdb/blob/main/design/tuple.md
@@ -13,11 +13,6 @@ export function packKey(kvKey: KvKey): Uint8Array {
 export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
     if (kvKeyPart instanceof Uint8Array) return new Uint8Array([ Typecode.ByteString, ...encodeZeroWithZeroFF(kvKeyPart), 0 ]);
     if (typeof kvKeyPart === 'string') return new Uint8Array([ Typecode.UnicodeString, ...encodeZeroWithZeroFF(new TextEncoder().encode(kvKeyPart)), 0]);
-    if (typeof kvKeyPart === 'number') {
-        const sub = new Uint8Array(8);
-        new DataView(sub.buffer).setFloat64(0, -kvKeyPart, false);
-        return new Uint8Array([ 33, ...sub]);
-    }
     if (kvKeyPart === false) return new Uint8Array([ Typecode.False ]);
     if (kvKeyPart === true) return new Uint8Array([ Typecode.True ]);
     if (typeof kvKeyPart === 'bigint') {
@@ -28,16 +23,22 @@ export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
         const typecode = neg ? (numBytes <= 8n ? (Typecode.IntegerOneByteNegative - Number(numBytes) + 1) : Typecode.IntegerArbitraryByteNegative)
             : (numBytes <= 8n ? (Typecode.IntegerOneBytePositive + Number(numBytes) - 1) : Typecode.IntegerArbitraryBytePositive);
         const bytes: number[] = [ typecode ];
-        if (numBytes > 8n) bytes.push(Number(neg ? 0xffn - numBytes : numBytes));
+        if (numBytes > 8n) bytes.push(Number(numBytes));
         for (let i = 0n; i < numBytes; i++) {
             const mask = 0xffn << 8n * (numBytes - i - 1n);
-            let byte = Number((abs & mask) >> (8n * (numBytes - i - 1n)));
-            if (neg) byte = 0xff - byte;
+            const byte = Number((abs & mask) >> (8n * (numBytes - i - 1n)));
             bytes.push(byte);
         }
+        if (neg) flipBytes(bytes, 1);
         return new Uint8Array(bytes);
     }
-    throw new Error(`implement keyPart: ${typeof kvKeyPart} ${kvKeyPart}`);
+    if (typeof kvKeyPart === 'number') {
+        const sub = new Uint8Array(8);
+        new DataView(sub.buffer).setFloat64(0, -Math.abs(kvKeyPart), false);
+        if (kvKeyPart < 0) flipBytes(sub);
+        return new Uint8Array([ Typecode.FloatingPointDouble, ...sub]);
+    }
+    throw new Error(`Unsupported keyPart: ${typeof kvKeyPart} ${kvKeyPart}`);
 }
 
 export function unpackKey(bytes: Uint8Array): KvKey {
@@ -59,6 +60,7 @@ export function unpackKey(bytes: Uint8Array): KvKey {
             }
             rt.push(typecode === Typecode.UnicodeString ? decoder.decode(new Uint8Array(newBytes)) : new Uint8Array(newBytes));
         } else if (typecode >= Typecode.IntegerArbitraryByteNegative && typecode <= Typecode.IntegerArbitraryBytePositive) {
+            // bigint
             const neg = typecode < Typecode.IntegerZero;
             const numBytes = BigInt((typecode === Typecode.IntegerArbitraryBytePositive || typecode === Typecode.IntegerArbitraryByteNegative) ? (neg ? (0xff - bytes[pos++]) : bytes[pos++]) : Math.abs(typecode - Typecode.IntegerZero));
             let val = 0n;
@@ -68,15 +70,14 @@ export function unpackKey(bytes: Uint8Array): KvKey {
                 val += (BigInt(byte) << ((numBytes - i - 1n) * 8n));
             }
             rt.push(neg ? -val : val);
-        } else if (typecode === 33) {
+        } else if (typecode === Typecode.FloatingPointDouble) {
             // number
-            // [ 192, 105, 0, 0, 0, 0, 0, 0] => 200
-            // [ 192,  94, 221,  47, 26, 159, 190, 119] => 123.456
-            // [ 63, 141,  63, 255, 255, 255, 255, 255 ] => -300 // TODO negative numbers not working
             const sub = new Uint8Array(bytes.subarray(pos, pos + 8));
+            const neg = sub[0] < 128;
+            if (neg) flipBytes(sub);
             const num = -new DataView(sub.buffer).getFloat64(0, false); 
             pos += 8;
-            rt.push(num);
+            rt.push(neg ? -num : num);
         } else if (typecode === Typecode.False) {
             // boolean false
             rt.push(false);
@@ -117,6 +118,7 @@ const enum Typecode {
     IntegerSevenBytePositive = 0x1b,
     IntegerEightBytePositive = 0x1c,
     IntegerArbitraryBytePositive = 0x1d,
+    FloatingPointDouble = 0x21, // IEEE Binary Floating Point double (64 bits)
     False = 0x26,
     True = 0x27,
 }

@@ -8,8 +8,9 @@ Deno.test({
         const tests: [ KvKey, number[] ][] = [
             [ [ 'foo' ], [ 2, 102, 111, 111, 0 ] ],
             [ [ 'f\0o' ], [ 2, 102, 0, 0xff, 111, 0 ] ],
+            [ [ 0 ], [ 33, 128,   0,   0,   0,   0,  0, 0,  0 ] ],
             [ [ 123.456 ], [ 33, 192,  94, 221,  47, 26, 159, 190, 119 ] ],
-            // [ [ -300 ], [ 33,  63, 141,  63, 255, 255, 255, 255, 255 ] ],  // TODO not working yet
+            [ [ -300 ], [ 33,  63, 141,  63, 255, 255, 255, 255, 255 ] ],
             [ [ 200 ], [ 33, 192, 105,   0,   0,   0,  0, 0,  0 ] ],
             [ [ new TextEncoder().encode('foo') ], [ 1, 102, 111, 111,   0 ] ],
             [ [ new Uint8Array([ 4, 0, 4 ]) ], [ 1, 4, 0, 255, 4, 0 ] ],
@@ -34,6 +35,5 @@ Deno.test({
             assertEquals(encoded, new Uint8Array(expected), key.join('/'));
             assertEquals(unpackKey(encoded), key);
         }
-       
     }
 });
