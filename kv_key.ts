@@ -20,18 +20,22 @@ export function packKeyPart(kvKeyPart: KvKeyPart): Uint8Array {
     }
     if (kvKeyPart === false) return new Uint8Array([ Typecode.False ]);
     if (kvKeyPart === true) return new Uint8Array([ Typecode.True ]);
-    if (kvKeyPart === 0n) return new Uint8Array([ Typecode.IntegerZero ]);
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart < 0) return new Uint8Array([ 19, 0xff - Number(-kvKeyPart) ]);
-    if (typeof kvKeyPart === 'bigint' && kvKeyPart > 0) {
-        const numBytes = BigInt(computeBigintMinimumNumberOfBytes(kvKeyPart));
-        const bytes: number[] = [];
-        if (numBytes > 8n) bytes.push(Number(numBytes));
+    if (typeof kvKeyPart === 'bigint') {
+        const neg = kvKeyPart < 0;
+        const abs = neg ? -kvKeyPart : kvKeyPart;
+        const numBytes = BigInt(computeBigintMinimumNumberOfBytes(abs));
+       
+        const typecode = neg ? (numBytes <= 8n ? (Typecode.IntegerOneByteNegative - Number(numBytes) + 1) : Typecode.IntegerArbitraryByteNegative)
+            : (numBytes <= 8n ? (Typecode.IntegerOneBytePositive + Number(numBytes) - 1) : Typecode.IntegerArbitraryBytePositive);
+        const bytes: number[] = [ typecode ];
+        if (numBytes > 8n) bytes.push(Number(neg ? 0xffn - numBytes : numBytes));
         for (let i = 0n; i < numBytes; i++) {
             const mask = 0xffn << 8n * (numBytes - i - 1n);
-            const byte = (kvKeyPart & mask) >> (8n * (numBytes - i - 1n));
-            bytes.push(Number(byte));
+            let byte = Number((abs & mask) >> (8n * (numBytes - i - 1n)));
+            if (neg) byte = 0xff - byte;
+            bytes.push(byte);
         }
-        return new Uint8Array([ numBytes <= 8n ? (Typecode.IntegerOneBytePositive + Number(numBytes) - 1) : Typecode.IntegerArbitraryBytePositive, ...bytes ]);
+        return new Uint8Array(bytes);
     }
     throw new Error(`implement keyPart: ${typeof kvKeyPart} ${kvKeyPart}`);
 }
@@ -54,21 +58,16 @@ export function unpackKey(bytes: Uint8Array): KvKey {
                 newBytes.push(byte);
             }
             rt.push(typecode === Typecode.UnicodeString ? decoder.decode(new Uint8Array(newBytes)) : new Uint8Array(newBytes));
-        } else if (typecode === 19) {
-            // bigint < 0
-            const val = 0xff - bytes[pos++];
-            rt.push(-BigInt(val));
-        } else if (typecode === Typecode.IntegerZero) {
-            // bigint 0
-            rt.push(0n);
-        } else if (typecode >= Typecode.IntegerOneBytePositive && typecode <= Typecode.IntegerArbitraryBytePositive) {
-            const numBytes = BigInt(typecode === Typecode.IntegerArbitraryBytePositive ? bytes[pos++] : (typecode - Typecode.IntegerOneBytePositive + 1));
+        } else if (typecode >= Typecode.IntegerArbitraryByteNegative && typecode <= Typecode.IntegerArbitraryBytePositive) {
+            const neg = typecode < Typecode.IntegerZero;
+            const numBytes = BigInt((typecode === Typecode.IntegerArbitraryBytePositive || typecode === Typecode.IntegerArbitraryByteNegative) ? (neg ? (0xff - bytes[pos++]) : bytes[pos++]) : Math.abs(typecode - Typecode.IntegerZero));
             let val = 0n;
             for (let i = 0n; i < numBytes; i++) {
-                const byte = BigInt(bytes[pos++]);
-                val += (byte << ((numBytes - i - 1n) * 8n));
+                let byte = bytes[pos++];
+                if (neg) byte = 0xff - byte;
+                val += (BigInt(byte) << ((numBytes - i - 1n) * 8n));
             }
-            rt.push(val);
+            rt.push(neg ? -val : val);
         } else if (typecode === 33) {
             // number
             // [ 192, 105, 0, 0, 0, 0, 0, 0] => 200
@@ -99,6 +98,15 @@ const decoder = new TextDecoder();
 const enum Typecode {
     ByteString = 0x01,
     UnicodeString = 0x02,
+    IntegerArbitraryByteNegative = 0x0b,
+    IntegerEightByteNegative = 0x0c,
+    IntegerSevenByteNegative = 0x0d,
+    IntegerSixByteNegative = 0x0e,
+    IntegerFiveByteNegative = 0x0f,
+    IntegerFourByteNegative = 0x10,
+    IntegerThreeByteNegative = 0x11,
+    IntegerTwoByteNegative = 0x12,
+    IntegerOneByteNegative = 0x13,
     IntegerZero = 0x14,
     IntegerOneBytePositive = 0x15,
     IntegerTwoBytePositive = 0x16,
