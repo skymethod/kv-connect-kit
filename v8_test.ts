@@ -2,7 +2,7 @@ import { encodeV8, decodeV8 } from './v8.ts';
 import { assertEquals } from 'https://deno.land/std@0.201.0/assert/assert_equals.ts';
 
 Deno.test({
-    name: 'encode/decode',
+    name: 'encodeV8/decodeV8',
     fn: () => {
         const tests: [unknown, number[]][] = [
             [ 'bar', [ 255, 15,  34, 3, 98, 97, 114 ] ],
