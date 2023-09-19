@@ -1,13 +1,15 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
+import { encodeJson as encodeJsonAtomicWrite } from './gen/messages/datapath/AtomicWrite.ts';
+import { encodeJson as encodeJsonSnapshotRead } from './gen/messages/datapath/SnapshotRead.ts';
 import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './gen/messages/datapath/index.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { decodeV8, encodeV8 } from './v8.ts';
 
-export function newRemoteService({ accessToken, wrapUnknownValues }: { accessToken: string, wrapUnknownValues?: boolean }): KvService {
+export function newRemoteService({ accessToken, wrapUnknownValues, debug }: { accessToken: string, wrapUnknownValues?: boolean, debug?: boolean }): KvService {
     return {
-        openKv: async (url) => await RemoteKv.of(url, { accessToken, wrapUnknownValues }),
+        openKv: async (url) => await RemoteKv.of(url, { accessToken, wrapUnknownValues, debug }),
         newU64: value => new RemoteKvU64(value),
     }
 }
@@ -48,15 +50,15 @@ function computeEnqueueMessage(value: unknown, { delay = 0, keysIfUndelivered = 
     }
 }
 
-async function fetchNewDatabaseMetadata(url: string, accessToken: string): Promise<DatabaseMetadata> {
-    console.log('Fetching database metadata...');
+async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug: boolean): Promise<DatabaseMetadata> {
+    if (debug) console.log('Fetching database metadata...');
     const metadata = await fetchDatabaseMetadata(url, accessToken);
     const { version, endpoints, token } = metadata;
     if (version !== 1) throw new Error(`Unsupported version: ${version}`);
     if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
     if (endpoints.length === 0) throw new Error(`No endpoints`);
     const expiresMillis = computeExpiresInMillis(metadata);
-    console.log(`Expires in ${Math.round((expiresMillis / 1000 / 60))} minutes`); // expect 60 minutes
+    if (debug) console.log(`Expires in ${Math.round((expiresMillis / 1000 / 60))} minutes`); // expect 60 minutes
     return metadata;
 }
 
@@ -82,6 +84,14 @@ function isValidHttpUrl(url: string): boolean {
     }
 }
 
+function snapshotReadToString(req: SnapshotRead): string {
+    return JSON.stringify(encodeJsonSnapshotRead(req));
+}
+
+function atomicWriteToString(req: AtomicWrite): string {
+    return JSON.stringify(encodeJsonAtomicWrite(req));
+}
+
 //
 
 class RemoteKv implements Kv {
@@ -89,20 +99,22 @@ class RemoteKv implements Kv {
     private readonly url: string;
     private readonly accessToken: string;
     private readonly wrapUnknownValues: boolean;
+    private readonly debug: boolean;
 
     private metadata: DatabaseMetadata;
 
-    private constructor(url: string, accessToken: string, wrapUnknownValues: boolean, metadata: DatabaseMetadata) {
+    private constructor(url: string, accessToken: string, wrapUnknownValues: boolean, debug: boolean, metadata: DatabaseMetadata) {
         this.url = url;
         this.accessToken = accessToken;
         this.wrapUnknownValues = wrapUnknownValues;
+        this.debug = debug;
         this.metadata = metadata;
     }
 
-    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false }: { accessToken: string, wrapUnknownValues?: boolean }) {
+    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false, debug = false }: { accessToken: string, wrapUnknownValues?: boolean, debug?: boolean }) {
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
-        const metadata = await fetchNewDatabaseMetadata(url, accessToken);
-        return new RemoteKv(url, accessToken, wrapUnknownValues, metadata);
+        const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
+        return new RemoteKv(url, accessToken, wrapUnknownValues, debug, metadata);
     }
 
 
@@ -223,9 +235,9 @@ class RemoteKv implements Kv {
     //
 
     private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
-        const { url, accessToken } = this;
+        const { url, accessToken, debug } = this;
         if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
-            this.metadata = await fetchNewDatabaseMetadata(url, accessToken);
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
         }
         const { metadata } = this;
         const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong').at(0);
@@ -236,47 +248,60 @@ class RemoteKv implements Kv {
     }
 
     private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
-        const { metadata } = this;
+        const { metadata, debug } = this;
         const endpoint = await this.locateEndpoint(consistency);
         const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
         const accessToken = metadata.token;
+        if (debug) console.log(`fetchSnapshotRead: ${snapshotReadToString(req)}`);
         return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
     }
 
     private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
-        const { metadata } = this;
+        const { metadata, debug } = this;
         const endpoint = await this.locateEndpoint('strong');
         const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
         const accessToken = metadata.token;
+        if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
     }
 
-    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit: limitOpt, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor, limit, reverse: reverseOpt }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { wrapUnknownValues } = this;
-        const req: SnapshotRead = { ranges: [] };
-        if ('prefix' in selector) {
-            throw new Error(`implement prefix-based`);
-        } else {
-            // TODO do this properly
-            const start = packKey([]);
-            const end = packKey([ 'z' ]);
-            const reverse = reverseOpt ?? false;
-            const limit = Math.min(limitOpt ?? 100, 500);
-            req.ranges.push({ start, end, limit, reverse });
-        }
-
-        const res = await this.snapshotRead(req, consistency);
-        for (const range of res.ranges) {
-            for (const entry of range.values) {
-                const key = unpackKey(entry.key);
-                if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
-                const value = decodeV8(entry.value, { wrapUnknownValues }) as T;
-                const versionstamp = encodeHex(entry.versionstamp);
-                yield { key, value, versionstamp };
+        let yielded = 0;
+        if (typeof limit === 'number' && yielded >= limit) return;
+        let lastYieldedKeyBytes: Uint8Array | undefined;
+        while (true) {
+            const req: SnapshotRead = { ranges: [] };
+            if ('prefix' in selector) {
+                throw new Error(`implement prefix-based`);
+            } else {
+                const start = lastYieldedKeyBytes ?? packKey(selector.start);
+                const end = packKey(selector.end);
+                const reverse = reverseOpt ?? false;
+                const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
+                req.ranges.push({ start, end, limit: batchLimit, reverse });
             }
-           
+
+            const res = await this.snapshotRead(req, consistency);
+            let entries = 0;
+            for (const range of res.ranges) {
+                for (const entry of range.values) {
+                    if (entries === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
+                    const key = unpackKey(entry.key);
+                    if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
+                    const value = decodeV8(entry.value, { wrapUnknownValues }) as T;
+                    const versionstamp = encodeHex(entry.versionstamp);
+                    yield { key, value, versionstamp };
+                    yielded++;
+                    entries++;
+                    // console.log({ yielded, entries, limit });
+                    if (typeof limit === 'number' && yielded >= limit) return;
+                    lastYieldedKeyBytes = entry.key;
+                }
+            }
+            if (entries === 0) return;
+            outCursor[0] = 'TODO';
         }
-        outCursor[0] = 'TODO';
     }
 }
 
