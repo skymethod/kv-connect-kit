@@ -22,7 +22,7 @@ export interface KvService {
      * 
      * Meant to shadow the Deno-specific: new Deno.KvU64(value)
      * */
-    newU64(value: bigint): KvU64;
+    newKvU64(value: bigint): KvU64;
 }
 
 export interface Kv {

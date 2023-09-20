@@ -49,7 +49,7 @@ export interface RemoteServiceOptions {
 export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     return {
         openKv: async (url) => await RemoteKv.of(url, opts),
-        newU64: value => new _KvU64(value),
+        newKvU64: value => new _KvU64(value),
     }
 }
 
@@ -66,7 +66,7 @@ export function makeNativeService(): KvService {
             return {
                 // deno-lint-ignore no-explicit-any
                 openKv: openKv as any,
-                newU64: value => new KvU64(value),
+                newKvU64: value => new KvU64(value),
             }
         }
     }
