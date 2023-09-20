@@ -412,7 +412,6 @@ class RemoteKv implements Kv {
                 for (const entry of range.values) {
                     if (entries++ === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
                     const key = unpackKey(entry.key);
-                    if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
                     const value = readValue(entry.value, entry.encoding, decodeV8) as T;
                     const versionstamp = encodeHex(entry.versionstamp);
                     lastYieldedKeyBytes = entry.key;
@@ -524,6 +523,7 @@ class _KvU64 implements KvU64 {
     readonly value: bigint;
 
     constructor(value: bigint) {
+        if (value < 0n) throw new Error('value must be a positive bigint');
         this.value = value;
     }
 
