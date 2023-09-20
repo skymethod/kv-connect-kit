@@ -1,7 +1,7 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue } from './proto/messages/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue, KvValueEncoding, KvValue } from './proto/messages/datapath/index.ts';
 import { encode as encodeBase64, decode as decodeBase64 } from './proto/runtime/base64.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
@@ -17,16 +17,22 @@ export interface RemoteServiceOptions {
     /** Access token used to authenticate to the remote service */
     readonly accessToken: string;
 
-    /** Wrap unsupported V8 payloads to instances of UnknownV8 instead of failing.  Only applicable when using the default serializer. */
+    /** Wrap unsupported V8 payloads to instances of UnknownV8 instead of failing.
+     * 
+     * Only applicable when using the default serializer. */
     readonly wrapUnknownValues?: boolean;
 
     /** Enable some console logging */
     readonly debug?: boolean;
 
-    /** Custom serializer to use when serializing v8-encoded KV values. e.g. the 'serialize' method in Node's 'v8' module. */
+    /** Custom serializer to use when serializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'serialize' function in Node's 'v8' module. */
     readonly encodeV8?: EncodeV8;
 
-    /** Custom deserializer to use when deserializing v8-encoded KV values. e.g. the 'deserialize' method in Node's 'v8' module. */
+    /** Custom deserializer to use when deserializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
     readonly decodeV8?: DecodeV8;
 }
 
@@ -79,7 +85,7 @@ function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutati
     return {
         key: packKey(key),
         mutationType: type === 'delete' ? 'M_CLEAR' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
-        value: mut.type === 'delete' ? undefined : { data: encodeV8(mut.value), encoding: 'VE_V8' },
+        value: mut.type === 'delete' ? undefined : packKvValue(mut.value, encodeV8),
     }
 }
 
@@ -99,6 +105,7 @@ async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug:
     if (version !== 1) throw new Error(`Unsupported version: ${version}`);
     if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
     if (endpoints.length === 0) throw new Error(`No endpoints`);
+    if (debug) endpoints.forEach(({ url, consistency }) => console.log(`${url} (${consistency})`));
     const expiresMillis = computeExpiresInMillis(metadata);
     if (debug) console.log(`Expires in ${Math.round((expiresMillis / 1000 / 60))} minutes`); // expect 60 minutes
     return metadata;
@@ -134,6 +141,30 @@ function atomicWriteToString(req: AtomicWrite): string {
     return JSON.stringify(encodeJsonAtomicWrite(req));
 }
 
+function unpackKvu(bytes: Uint8Array): KvU64 {
+    if (bytes.length !== 8) throw new Error();
+    if (bytes.buffer.byteLength !== 8) bytes = new Uint8Array(bytes);
+    const rt = new DataView(bytes.buffer).getBigUint64(0, true);
+    return new RemoteKvU64(rt);
+}
+
+function packKvu(value: RemoteKvU64): Uint8Array {
+    const rt = new Uint8Array(8);
+    new DataView(rt.buffer).setBigUint64(0, value.value, true);
+    return rt;
+}
+
+function readValue(bytes: Uint8Array, encoding: KvValueEncoding, decodeV8: DecodeV8) {
+    if (encoding === 'VE_V8') return decodeV8(bytes);
+    if (encoding === 'VE_LE64') return unpackKvu(bytes);
+    throw new Error(`Unsupported encoding: ${encoding}`);
+}
+
+function packKvValue(value: unknown, encodeV8: EncodeV8): KvValue {
+    if (value instanceof RemoteKvU64) return { encoding: 'VE_LE64', data: packKvu(value) };
+    return { encoding: 'VE_V8',  data: encodeV8(value) };
+}
+
 //
 
 class RemoteKv implements Kv {
@@ -155,10 +186,15 @@ class RemoteKv implements Kv {
         this.metadata = metadata;
     }
 
-    static async of(url: string | undefined, { accessToken, wrapUnknownValues = false, debug = false, encodeV8 = _encodeV8, decodeV8 }: RemoteServiceOptions) {
+    static async of(url: string | undefined, opts: RemoteServiceOptions) {
+        const { accessToken, wrapUnknownValues = false, debug = false } = opts;
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
-        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues })), metadata);
+        
+        const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
+        const decodeV8: DecodeV8 = opts.decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues }));
+
+        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, metadata);
     }
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
@@ -171,7 +207,7 @@ class RemoteKv implements Kv {
         const res = await this.snapshotRead(req, consistency);
         for (const range of res.ranges) {
             for (const item of range.values) {
-                if (equalBytes(item.key, packedKey)) return { key, value: decodeV8(item.value) as T, versionstamp: encodeHex(item.versionstamp) };
+                if (equalBytes(item.key, packedKey)) return { key, value: readValue(item.value, item.encoding, decodeV8) as T, versionstamp: encodeHex(item.versionstamp) };
             }
         }
         return { key, value: null, versionstamp: null };
@@ -192,7 +228,7 @@ class RemoteKv implements Kv {
             for (const item of range.values) {
                 const itemKeyHex = encodeHex(item.key);
                 const i = packedKeysHex.indexOf(itemKeyHex);
-                if (i >= 0) rt[i] = { key: keys[i], value: decodeV8(item.value) as T, versionstamp: encodeHex(item.versionstamp) };
+                if (i >= 0) rt[i] = { key: keys[i], value: readValue(item.value, item.encoding, decodeV8) as T, versionstamp: encodeHex(item.versionstamp) };
             }
         }
         return rt;
@@ -209,10 +245,7 @@ class RemoteKv implements Kv {
                 {
                     key: packKey(key),
                     mutationType: 'M_SET',
-                    value: {
-                        data: encodeV8(value),
-                        encoding: 'VE_V8',
-                    }
+                    value: packKvValue(value, encodeV8),
                 }
             ],
         };
@@ -349,7 +382,7 @@ class RemoteKv implements Kv {
                     if (entries === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
                     const key = unpackKey(entry.key);
                     if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
-                    const value = decodeV8(entry.value) as T;
+                    const value = readValue(entry.value, entry.encoding, decodeV8) as T;
                     const versionstamp = encodeHex(entry.versionstamp);
                     lastYieldedKeyBytes = entry.key;
                     outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield

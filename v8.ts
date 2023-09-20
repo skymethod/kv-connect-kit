@@ -6,7 +6,7 @@ export function decodeV8(bytes: Uint8Array, { wrapUnknownValues = false }: { wra
     if (bytes.length === 0) throw new Error(`decode error: empty input`);
     let pos = 0;
     const kVersion = bytes[pos++];
-    if (kVersion !== SerializationTag.kVersion) throw new Error(`decode error: Unsupported kVersion ${kVersion}`);
+    if (kVersion !== SerializationTag.kVersion) throw new Error(`decode error: Unsupported kVersion ${kVersion} [${[...bytes].join(', ')}]`);
     const version = bytes[pos++];
     if (version !== kLatestVersion) throw new Error(`decode error: Unsupported version ${version}`);
     const tag = bytes[pos++];
@@ -46,7 +46,7 @@ export function decodeV8(bytes: Uint8Array, { wrapUnknownValues = false }: { wra
     } else if (wrapUnknownValues) {
         return new UnknownV8(bytes);
     } else {
-        throw new Error(`decodeV8 error: Unsupported tag ${tag} ('${String.fromCharCode(tag)}') at ${pos} in [${bytes.join(', ')}]`);
+        throw new Error(`decode error: Unsupported v8 tag ${tag} ('${String.fromCharCode(tag)}') at ${pos} in [${bytes.join(', ')}]`);
     }
 }
 
@@ -81,7 +81,7 @@ export function encodeV8(value: unknown): Uint8Array {
     //     new DataView(bytes.buffer).setBigInt64(0, value, true);
     //     return new Uint8Array([ SerializationTag.kVersion, kLatestVersion, SerializationTag.kBigInt, 16, ...bytes ]);
     }
-    throw new Error(`encodeV8 error: Unsupported value ${typeof value} ${value}`);
+    throw new Error(`encode error: Unsupported v8 value ${typeof value} ${value}`);
 }
 
 //
