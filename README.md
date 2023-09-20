@@ -2,6 +2,10 @@
 
 Minimal Typescript client implementing the [KV Connect protocol](https://github.com/denoland/deno/tree/main/ext/kv#kv-connect). Access [Deno KV](https://deno.com/kv) remotely from any Javascript environment like Node, Cloudflare Workers, Bun, Deno, or the browser. 
 
+- Use `makeRemoteService` to provide your access token and configure optional setup params
+- Use the returned service to call `openKv` (equiv to [`Deno.openKv`](https://deno.land/api?s=Deno.openKv&unstable)) and `newU64` (equiv to [`new Deno.KvU64`](https://deno.land/api?s=Deno.KvU64&unstable))
+- The `KV` instance returned can be interacted with via the standard [KV api](https://deno.land/api?s=Deno.Kv&unstable) in any Javascript environment.
+
 ### Quick start - Deno
 
 ```ts
@@ -97,3 +101,64 @@ kv.close();
 
 - Protobuf code generated with [pb](https://deno.land/x/pbkit/cli/pb/README.md)
 - NPM package generated with [dnt](https://github.com/denoland/dnt)
+
+
+---
+
+
+### Options to `makeRemoteService`
+
+```ts
+export interface RemoteServiceOptions {
+    /** Access token used to authenticate to the remote service */
+    readonly accessToken: string;
+
+    /** Wrap unsupported V8 payloads to instances of UnknownV8 instead of failing.
+     * 
+     * Only applicable when using the default serializer. */
+    readonly wrapUnknownValues?: boolean;
+
+    /** Enable some console logging */
+    readonly debug?: boolean;
+
+    /** Custom serializer to use when serializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'serialize' function in Node's 'v8' module. */
+    readonly encodeV8?: EncodeV8;
+
+    /** Custom deserializer to use when deserializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
+    readonly decodeV8?: DecodeV8;
+
+    /** Custom fetcher to use for the underlying http calls.
+     * 
+     * Defaults to global 'fetch'`
+     */
+    readonly fetcher?: Fetcher;
+}
+```
+
+### A note about V8 serialization
+
+_All `KVKey` types are fully supported, as they don't use V8 serialization._
+
+Deno KV _values_ support any structured-serializable JavaScript values, using V8's internal serializer.  This makes client interaction from pure Javascript environment without access to V8 internals... tricky. 
+
+A default V8 serializer is included that supports a limited subset of values (see below), but can optionally treat the values as opaque bytes using the `wrapUnknownValues` option.  This is often good enough for listing/migrating/logic that behaves on keys only.
+
+If anyone knows of a pure JS or WASM implementation of V8's serializer, please let me know!
+
+KV value types supported by the default serializer:
+
+| Type      | Supported |
+| ----------- | ----------- |
+| `null`      | ✅       |
+| `undefined`   | ✅        |
+| `true`/`false`   | ✅        |
+| `Uint8Array`   | ✅        |
+| `string`   | ✅        |
+
+PRs to [v8.ts](https://github.com/skymethod/kv-connect-kit/blob/master/v8.ts) welcome - this would benefit everyone using this library!
+
+If you have access to the V8 serializer on your runtime (like the `serialize`/`deserialize` in Node's `v8` module), you can pass it into the `encodeV8` and `decodeV8` options to get full value support.  Note you must be using the version that the Deno KV service uses, so this works on Node 18+ only.
