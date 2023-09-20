@@ -53,6 +53,25 @@ export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     }
 }
 
+/**
+ * Creates a new KvService instance that can be used to access Deno's native implementation (only works in the Deno runtime!)
+ * 
+ * Requires the --unstable flag to `deno run` and any applicable --allow-read/allow-write/allow-net flags
+ */
+export function makeNativeService(): KvService {
+    if ('Deno' in globalThis) {
+        const { openKv, KvU64 } = globalThis.Deno;
+        if (typeof openKv === 'function' && typeof KvU64 === 'function') {
+            return {
+                // deno-lint-ignore no-explicit-any
+                openKv: openKv as any,
+                newU64: value => new KvU64(value),
+            }
+        }
+    }
+    throw new Error(`Global 'Deno.openKv' or 'Deno.KvU64' not found`);
+}
+
 //
 
 type Cursor = { lastYieldedKeyBytes: Uint8Array }

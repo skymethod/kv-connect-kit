@@ -20,7 +20,7 @@ await build({
         // package.json properties
         name: 'kv-connect-kit',
         version: Deno.args[0],
-        description: 'Minimal Typescript client implementing the KV Connect protocol. Connect to Deno KV remotely from Node, Cloudflare Workers, Bun, and Deno.',
+        description: 'Minimal Typescript client implementing the KV Connect protocol. Connect to Deno KV remotely from Node, Cloudflare Workers, Bun, Deno, and the browser.',
         license: 'MIT',
         repository: {
             type: 'git',
@@ -29,6 +29,7 @@ await build({
         bugs: {
             url: 'https://github.com/skymethod/kv-connect-kit/issues',
         },
+        homepage: 'https://github.com/skymethod/kv-connect-kit',
       
     },
     postBuild() {
