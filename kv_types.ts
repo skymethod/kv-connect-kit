@@ -23,6 +23,12 @@ export interface KvService {
      * Meant to shadow the Deno-specific: new Deno.KvU64(value)
      * */
     newKvU64(value: bigint): KvU64;
+
+    /** Returns whether or not the provided value is an instance of KvU64
+     *
+     * Meant to shadow the Deno-specific: instanceof Deno.KvU64
+     */
+    isKvU64(obj: unknown): obj is KvU64
 }
 
 export interface Kv {
