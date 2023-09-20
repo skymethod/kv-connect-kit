@@ -60,6 +60,7 @@ export function makeRemoteService(opts: RemoteServiceOptions): KvService {
  */
 export function makeNativeService(): KvService {
     if ('Deno' in globalThis) {
+        // deno-lint-ignore no-explicit-any
         const { openKv, KvU64 } = (globalThis as any).Deno;
         if (typeof openKv === 'function' && typeof KvU64 === 'function') {
             return {
