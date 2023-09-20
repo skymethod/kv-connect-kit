@@ -9,8 +9,8 @@ import { isRecord } from './check.ts';
 // https://github.com/denoland/deno/blob/main/cli/schemas/kv-metadata-exchange-response.v1.json
 // https://github.com/denoland/deno/blob/main/ext/kv/proto/datapath.proto
 
-export async function fetchDatabaseMetadata(url: string, accessToken: string): Promise<DatabaseMetadata> {
-    const res = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } });
+export async function fetchDatabaseMetadata(url: string, accessToken: string, fetcher: typeof fetch = fetch): Promise<DatabaseMetadata> {
+    const res = await fetcher(url, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } });
     if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
     const contentType = res.headers.get('content-type') ?? undefined;
     if (contentType !== 'application/json') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
@@ -19,18 +19,18 @@ export async function fetchDatabaseMetadata(url: string, accessToken: string): P
     return metadata;
 }
 
-export async function fetchSnapshotRead(url: string, accessToken: string, databaseId: string, req: SnapshotRead): Promise<SnapshotReadOutput> {
-    return decodeSnapshotReadOutput(await fetchProtobuf(url, accessToken, databaseId, encodeSnapshotRead(req)));
+export async function fetchSnapshotRead(url: string, accessToken: string, databaseId: string, req: SnapshotRead, fetcher: typeof fetch = fetch): Promise<SnapshotReadOutput> {
+    return decodeSnapshotReadOutput(await fetchProtobuf(url, accessToken, databaseId, encodeSnapshotRead(req), fetcher));
 }
 
-export async function fetchAtomicWrite(url: string, accessToken: string, databaseId: string, write: AtomicWrite): Promise<AtomicWriteOutput> {
-    return decodeAtomicWriteOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeAtomicWrite(write)));
+export async function fetchAtomicWrite(url: string, accessToken: string, databaseId: string, write: AtomicWrite, fetcher: typeof fetch = fetch): Promise<AtomicWriteOutput> {
+    return decodeAtomicWriteOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeAtomicWrite(write), fetcher));
 }
 
 //
 
-async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array): Promise<Uint8Array> {
-    const res = await fetch(url, { method: 'POST', body, headers: { 'x-transaction-domain-id': databaseId , authorization: `Bearer ${accessToken}` } });
+async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array, fetcher: typeof fetch = fetch): Promise<Uint8Array> {
+    const res = await fetcher(url, { method: 'POST', body, headers: { 'x-transaction-domain-id': databaseId , authorization: `Bearer ${accessToken}` } });
     if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
     const contentType = res.headers.get('content-type') ?? undefined;
     if (contentType !== 'application/x-protobuf') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);

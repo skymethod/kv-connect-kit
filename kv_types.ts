@@ -12,11 +12,16 @@ export interface KvService {
      *
      * @tags allow-read, allow-write
      * @category KV
+     * 
+     * Meant to shadow the Deno-specific: Deno.openKv
      */
     openKv(path?: string): Promise<Kv>;
 
     /** Create a new `KvU64` instance from the given bigint value. If the value
-     * is signed or greater than 64-bits, an error will be thrown. */
+     * is signed or greater than 64-bits, an error will be thrown.
+     * 
+     * Meant to shadow the Deno-specific: new Deno.KvU64(value)
+     * */
     newU64(value: bigint): KvU64;
 }
 

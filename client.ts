@@ -12,6 +12,7 @@ export { UnknownV8 } from './v8.ts';
 
 type EncodeV8 = (value: unknown) => Uint8Array;
 type DecodeV8 = (bytes: Uint8Array) => unknown;
+type Fetcher = typeof fetch;
 
 export interface RemoteServiceOptions {
     /** Access token used to authenticate to the remote service */
@@ -34,15 +35,21 @@ export interface RemoteServiceOptions {
      * 
      * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
     readonly decodeV8?: DecodeV8;
+
+    /** Custom fetcher to use for the underlying http calls.
+     * 
+     * Defaults to global 'fetch'`
+     */
+    readonly fetcher?: Fetcher;
 }
 
 /**
  * Creates a new KvService instance that can be used to open a remote KV database.
  */
-export function newRemoteService(opts: RemoteServiceOptions): KvService {
+export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     return {
         openKv: async (url) => await RemoteKv.of(url, opts),
-        newU64: value => new RemoteKvU64(value),
+        newU64: value => new _KvU64(value),
     }
 }
 
@@ -98,9 +105,9 @@ function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, 
     }
 }
 
-async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug: boolean): Promise<DatabaseMetadata> {
+async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug: boolean, fetcher: Fetcher): Promise<DatabaseMetadata> {
     if (debug) console.log('Fetching database metadata...');
-    const metadata = await fetchDatabaseMetadata(url, accessToken);
+    const metadata = await fetchDatabaseMetadata(url, accessToken, fetcher);
     const { version, endpoints, token } = metadata;
     if (version !== 1) throw new Error(`Unsupported version: ${version}`);
     if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
@@ -141,14 +148,14 @@ function atomicWriteToString(req: AtomicWrite): string {
     return JSON.stringify(encodeJsonAtomicWrite(req));
 }
 
-function unpackKvu(bytes: Uint8Array): KvU64 {
+function unpackKvu(bytes: Uint8Array): _KvU64 {
     if (bytes.length !== 8) throw new Error();
     if (bytes.buffer.byteLength !== 8) bytes = new Uint8Array(bytes);
     const rt = new DataView(bytes.buffer).getBigUint64(0, true);
-    return new RemoteKvU64(rt);
+    return new _KvU64(rt);
 }
 
-function packKvu(value: RemoteKvU64): Uint8Array {
+function packKvu(value: _KvU64): Uint8Array {
     const rt = new Uint8Array(8);
     new DataView(rt.buffer).setBigUint64(0, value.value, true);
     return rt;
@@ -157,11 +164,13 @@ function packKvu(value: RemoteKvU64): Uint8Array {
 function readValue(bytes: Uint8Array, encoding: KvValueEncoding, decodeV8: DecodeV8) {
     if (encoding === 'VE_V8') return decodeV8(bytes);
     if (encoding === 'VE_LE64') return unpackKvu(bytes);
-    throw new Error(`Unsupported encoding: ${encoding}`);
+    if (encoding === 'VE_BYTES') return bytes;
+    throw new Error(`Unsupported encoding: ${encoding} [${[...bytes].join(', ')}]`);
 }
 
 function packKvValue(value: unknown, encodeV8: EncodeV8): KvValue {
-    if (value instanceof RemoteKvU64) return { encoding: 'VE_LE64', data: packKvu(value) };
+    if (value instanceof _KvU64) return { encoding: 'VE_LE64', data: packKvu(value) };
+    if (value instanceof Uint8Array) return { encoding: 'VE_BYTES', data: value };
     return { encoding: 'VE_V8',  data: encodeV8(value) };
 }
 
@@ -173,28 +182,30 @@ class RemoteKv implements Kv {
     private readonly accessToken: string;
     private readonly debug: boolean;
     private readonly encodeV8: EncodeV8;
-    private readonly decodeV8: DecodeV8
+    private readonly decodeV8: DecodeV8;
+    private readonly fetcher: Fetcher;
 
     private metadata: DatabaseMetadata;
 
-    private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, metadata: DatabaseMetadata) {
+    private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, metadata: DatabaseMetadata) {
         this.url = url;
         this.accessToken = accessToken;
         this.debug = debug;
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
+        this.fetcher = fetcher;
         this.metadata = metadata;
     }
 
     static async of(url: string | undefined, opts: RemoteServiceOptions) {
-        const { accessToken, wrapUnknownValues = false, debug = false } = opts;
+        const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch } = opts;
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
-        const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
+        const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher);
         
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
         const decodeV8: DecodeV8 = opts.decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues }));
 
-        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, metadata);
+        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, fetcher, metadata);
     }
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
@@ -314,9 +325,9 @@ class RemoteKv implements Kv {
     //
 
     private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
-        const { url, accessToken, debug } = this;
+        const { url, accessToken, debug, fetcher } = this;
         if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
-            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug);
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher);
         }
         const { metadata } = this;
         const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
@@ -327,21 +338,21 @@ class RemoteKv implements Kv {
     }
 
     private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
-        const { metadata, debug } = this;
+        const { metadata, debug, fetcher } = this;
         const endpoint = await this.locateEndpoint(consistency);
         const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
         const accessToken = metadata.token;
         if (debug) console.log(`fetchSnapshotRead: ${snapshotReadToString(req)}`);
-        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req);
+        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher);
     }
 
     private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
-        const { metadata, debug } = this;
+        const { metadata, debug, fetcher } = this;
         const endpoint = await this.locateEndpoint('strong');
         const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
         const accessToken = metadata.token;
         if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
-        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req);
+        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher);
     }
 
     async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
@@ -379,7 +390,7 @@ class RemoteKv implements Kv {
             let entries = 0;
             for (const range of res.ranges) {
                 for (const entry of range.values) {
-                    if (entries === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
+                    if (entries++ === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
                     const key = unpackKey(entry.key);
                     if (entry.encoding !== 'VE_V8') throw new Error(`Unsupported entry encoding: ${entry.encoding}`);
                     const value = readValue(entry.value, entry.encoding, decodeV8) as T;
@@ -388,12 +399,11 @@ class RemoteKv implements Kv {
                     outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield
                     yield { key, value, versionstamp };
                     yielded++;
-                    entries++;
                     // console.log({ yielded, entries, limit });
                     if (typeof limit === 'number' && yielded >= limit) return;
                 }
             }
-            if (entries === 0) return;
+            if (entries < batchLimit) return;
         }
     }
 }
@@ -431,15 +441,6 @@ class RemoteKvListIterator<T> implements KvListIterator<T> {
 
 }
 
-class RemoteKvU64 implements KvU64 {
-    readonly value: bigint;
-
-    constructor(value: bigint) {
-        this.value = value;
-    }
-
-}
-
 class RemoteAtomicOperation implements AtomicOperation {
 
     private readonly encodeV8: EncodeV8;
@@ -464,17 +465,17 @@ class RemoteAtomicOperation implements AtomicOperation {
 
     sum(key: KvKey, n: bigint): this {
         checkKeyNotEmpty(key);
-        return this.mutate({ type: 'sum', key, value: new RemoteKvU64(n) });
+        return this.mutate({ type: 'sum', key, value: new _KvU64(n) });
     }
 
     min(key: KvKey, n: bigint): this {
         checkKeyNotEmpty(key);
-        return this.mutate({ type: 'min', key, value: new RemoteKvU64(n) });
+        return this.mutate({ type: 'min', key, value: new _KvU64(n) });
     }
 
     max(key: KvKey, n: bigint): this {
         checkKeyNotEmpty(key);
-        return this.mutate({ type: 'max', key, value: new RemoteKvU64(n) });
+        return this.mutate({ type: 'max', key, value: new _KvU64(n) });
     }
 
     set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
@@ -495,6 +496,15 @@ class RemoteAtomicOperation implements AtomicOperation {
 
     commit(): Promise<KvCommitResult | KvCommitError> {
         return this._commit(this.write);
+    }
+
+}
+
+class _KvU64 implements KvU64 {
+    readonly value: bigint;
+
+    constructor(value: bigint) {
+        this.value = value;
     }
 
 }
