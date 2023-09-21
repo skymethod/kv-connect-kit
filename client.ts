@@ -107,7 +107,7 @@ function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
 function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheck {
     return {
         key: packKey(key),
-        versionstamp: versionstamp === null ? emptyVersionstamp : decodeHex(versionstamp),
+        versionstamp: (versionstamp === null || versionstamp === undefined) ? emptyVersionstamp : decodeHex(versionstamp),
     }
 }
 
