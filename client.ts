@@ -77,6 +77,8 @@ export function makeNativeService(): KvService {
 
 //
 
+const emptyVersionstamp = new Uint8Array(10);
+
 type Cursor = { lastYieldedKeyBytes: Uint8Array }
 
 function packCursor({ lastYieldedKeyBytes }: Cursor): string {
@@ -105,7 +107,7 @@ function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
 function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheck {
     return {
         key: packKey(key),
-        versionstamp: versionstamp === null ? new Uint8Array() : decodeHex(versionstamp),
+        versionstamp: versionstamp === null ? emptyVersionstamp : decodeHex(versionstamp),
     }
 }
 
@@ -335,7 +337,7 @@ class RemoteKv implements Kv {
             const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
             commitCalled = true;
             if (status === 'AW_CHECK_FAILURE') return { ok: false };
-            if (status !== 'AW_SUCCESS') throw new Error(`enqueue failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+            if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
             return { ok: true, versionstamp: encodeHex(versionstamp) };
         });
     }
