@@ -38,6 +38,7 @@ export declare namespace $.datapath {
     key: Uint8Array;
     value?: KvValue;
     mutationType: KvMutationType;
+    expireAtMs: string;
   }
 }
 
@@ -48,6 +49,7 @@ export function getDefaultValue(): $.datapath.KvMutation {
     key: new Uint8Array(),
     value: undefined,
     mutationType: "M_UNSPECIFIED",
+    expireAtMs: "0",
   };
 }
 
@@ -63,6 +65,7 @@ export function encodeJson(value: $.datapath.KvMutation): unknown {
   if (value.key !== undefined) result.key = tsValueToJsonValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = encodeJson_1(value.value);
   if (value.mutationType !== undefined) result.mutationType = tsValueToJsonValueFns.enum(value.mutationType);
+  if (value.expireAtMs !== undefined) result.expireAtMs = tsValueToJsonValueFns.int64(value.expireAtMs);
   return result;
 }
 
@@ -71,6 +74,7 @@ export function decodeJson(value: any): $.datapath.KvMutation {
   if (value.key !== undefined) result.key = jsonValueToTsValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = decodeJson_1(value.value);
   if (value.mutationType !== undefined) result.mutationType = jsonValueToTsValueFns.enum(value.mutationType) as KvMutationType;
+  if (value.expireAtMs !== undefined) result.expireAtMs = jsonValueToTsValueFns.int64(value.expireAtMs);
   return result;
 }
 
@@ -92,6 +96,12 @@ export function encodeBinary(value: $.datapath.KvMutation): Uint8Array {
     const tsValue = value.mutationType;
     result.push(
       [3, { type: WireType.Varint as const, value: new Long(name2num[tsValue as keyof typeof name2num]) }],
+    );
+  }
+  if (value.expireAtMs !== undefined) {
+    const tsValue = value.expireAtMs;
+    result.push(
+      [4, tsValueToWireValueFns.int64(tsValue)],
     );
   }
   return serialize(result);
@@ -121,6 +131,13 @@ export function decodeBinary(binary: Uint8Array): $.datapath.KvMutation {
     const value = wireValue.type === WireType.Varint ? num2name[wireValue.value[0] as keyof typeof num2name] : undefined;
     if (value === undefined) break field;
     result.mutationType = value;
+  }
+  field: {
+    const wireValue = wireFields.get(4);
+    if (wireValue === undefined) break field;
+    const value = wireValueToTsValueFns.int64(wireValue);
+    if (value === undefined) break field;
+    result.expireAtMs = value;
   }
   return result;
 }

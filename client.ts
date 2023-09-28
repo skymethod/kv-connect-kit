@@ -117,6 +117,7 @@ function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutati
         key: packKey(key),
         mutationType: type === 'delete' ? 'M_CLEAR' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
         value: mut.type === 'delete' ? undefined : packKvValue(mut.value, encodeV8),
+        expireAtMs: mut.type === 'set' && typeof mut.expireIn === 'number' ? (Date.now() + mut.expireIn).toString() : '0',
     }
 }
 
@@ -152,7 +153,8 @@ function checkKeyNotEmpty(key: KvKey): void {
 }
 
 function checkExpireIn(expireIn: number | undefined): void {
-    if (typeof expireIn === 'number') throw new Error(`'expireIn' not supported over KV Connect`); // https://github.com/denoland/deno/issues/20560
+    const valid = expireIn === undefined || typeof expireIn === 'number' && expireIn > 0 && Number.isSafeInteger(expireIn);
+    if (!valid) throw new Error(`Bad 'expireIn', expected optional positive integer, found ${expireIn}`);
 }
 
 function isValidHttpUrl(url: string): boolean {
@@ -281,6 +283,7 @@ class RemoteKv implements Kv {
                     key: packKey(key),
                     mutationType: 'M_SET',
                     value: packKvValue(value, encodeV8),
+                    expireAtMs: typeof expireIn === 'number' ? (Date.now() + expireIn).toString() : '0',
                 }
             ],
         };
@@ -297,6 +300,7 @@ class RemoteKv implements Kv {
                 {
                     key: packKey(key),
                     mutationType: 'M_CLEAR',
+                    expireAtMs: '0',
                 }
             ],
         };
@@ -482,6 +486,7 @@ class RemoteAtomicOperation implements AtomicOperation {
 
     mutate(...mutations: KvMutation[]): this {
         mutations.map(v => v.key).forEach(checkKeyNotEmpty);
+        mutations.forEach(v => v.type === 'set' && checkExpireIn(v.expireIn));
         this.write.kvMutations.push(...mutations.map(v => computeKvMutationMessage(v, this.encodeV8)));
         return this;
     }
@@ -504,7 +509,7 @@ class RemoteAtomicOperation implements AtomicOperation {
     set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
         checkExpireIn(expireIn);
         checkKeyNotEmpty(key);
-        return this.mutate({ type: 'set', key, value });
+        return this.mutate({ type: 'set', key, value, expireIn });
     }
 
     delete(key: KvKey): this {
