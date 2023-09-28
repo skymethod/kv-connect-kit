@@ -9,7 +9,7 @@ Minimal Typescript client implementing the [KV Connect protocol](https://github.
 ### Quick start - Deno
 
 ```ts
-import { makeRemoteService } from 'https://raw.githubusercontent.com/skymethod/kv-connect-kit/v0.0.3/client.ts';
+import { makeRemoteService } from 'https://raw.githubusercontent.com/skymethod/kv-connect-kit/v0.0.4/client.ts';
 
 const accessToken = Deno.env.get('DENO_KV_ACCESS_TOKEN');
 if (accessToken === undefined) throw new Error(`Set your personal access token: https://dash.deno.com/account#access-tokens`);
