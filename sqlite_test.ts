@@ -7,6 +7,5 @@ Deno.test({
         const { openKv } = makeSqliteService();
         const kv = await openKv();
         kv.close();
-       
     }
 });
