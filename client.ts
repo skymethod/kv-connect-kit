@@ -7,7 +7,8 @@ import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
-import { isRecord } from './check.ts';
+import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
+import { _KvU64 } from './kv_u64.ts';
 export { UnknownV8 } from './v8.ts';
 
 type EncodeV8 = (value: unknown) => Uint8Array;
@@ -146,15 +147,6 @@ async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug:
 function computeExpiresInMillis({ expiresAt }: DatabaseMetadata): number {
     const expiresTime = new Date(expiresAt).getTime();
     return expiresTime - Date.now();
-}
-
-function checkKeyNotEmpty(key: KvKey): void {
-    if (key.length === 0) throw new Error(`Key cannot be empty`);
-}
-
-function checkExpireIn(expireIn: number | undefined): void {
-    const valid = expireIn === undefined || typeof expireIn === 'number' && expireIn > 0 && Number.isSafeInteger(expireIn);
-    if (!valid) throw new Error(`Bad 'expireIn', expected optional positive integer, found ${expireIn}`);
 }
 
 function isValidHttpUrl(url: string): boolean {
@@ -524,16 +516,6 @@ class RemoteAtomicOperation implements AtomicOperation {
 
     commit(): Promise<KvCommitResult | KvCommitError> {
         return this._commit(this.write);
-    }
-
-}
-
-class _KvU64 implements KvU64 {
-    readonly value: bigint;
-
-    constructor(value: bigint) {
-        if (value < 0n) throw new Error('value must be a positive bigint');
-        this.value = value;
     }
 
 }
