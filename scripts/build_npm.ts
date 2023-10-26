@@ -1,4 +1,4 @@
-import { join } from 'https://deno.land/std@0.182.0/path/mod.ts';
+import { join } from 'https://deno.land/std@0.204.0/path/mod.ts';
 import { build, emptyDir } from 'https://deno.land/x/dnt@0.38.1/mod.ts';
 
 const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
