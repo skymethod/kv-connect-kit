@@ -9,6 +9,7 @@ import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvCons
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
 import { _KvU64 } from './kv_u64.ts';
+import { GenericKvListIterator } from './kv_util.ts';
 export { UnknownV8 } from './v8.ts';
 
 type EncodeV8 = (value: unknown) => Uint8Array;
@@ -305,7 +306,7 @@ class RemoteKv implements Kv {
         if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
-        return new RemoteKvListIterator<T>(generator, () => outCursor[0]);
+        return new GenericKvListIterator<T>(generator, () => outCursor[0]);
     }
 
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
@@ -375,7 +376,7 @@ class RemoteKv implements Kv {
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher);
     }
 
-    async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    private async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { decodeV8 } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
@@ -427,38 +428,7 @@ class RemoteKv implements Kv {
     }
 }
 
-class RemoteKvListIterator<T> implements KvListIterator<T> {
-    private readonly generator: AsyncGenerator<KvEntry<T>>;
-    private readonly _cursor: () => string;
 
-    constructor(generator: AsyncGenerator<KvEntry<T>>, cursor: () => string) {
-        this.generator = generator;
-        this._cursor = cursor;
-    }
-
-    get cursor(): string {
-        return this._cursor();
-    }
-
-    next(): Promise<IteratorResult<KvEntry<T>, undefined>> {
-        return this.generator.next();
-    }
-
-    [Symbol.asyncIterator](): AsyncIterableIterator<KvEntry<T>> {
-        return this.generator[Symbol.asyncIterator]();
-    }
-
-    // deno-lint-ignore no-explicit-any
-    return?(value?: any): Promise<IteratorResult<KvEntry<T>, any>> {
-        return this.generator.return(value);
-    }
-
-    // deno-lint-ignore no-explicit-any
-    throw?(e?: any): Promise<IteratorResult<KvEntry<T>, any>> {
-        return this.generator.throw(e);
-    }
-
-}
 
 class RemoteAtomicOperation implements AtomicOperation {
 

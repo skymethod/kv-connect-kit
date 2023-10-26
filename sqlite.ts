@@ -1,8 +1,9 @@
-import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
-import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
-import { _KvU64 } from './kv_u64.ts';
-import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
+import { checkKeyNotEmpty, isRecord } from './check.ts';
+import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
+import { _KvU64 } from './kv_u64.ts';
+import { GenericAtomicOperation, GenericKvListIterator } from './kv_util.ts';
+import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 type EncodeV8 = (value: unknown) => Uint8Array;
 type DecodeV8 = (bytes: Uint8Array) => unknown;
@@ -50,6 +51,9 @@ class SqliteKv implements Kv {
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
 
+    private closed = false;
+    private version = 0;
+
     private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8) {
         this.db = db;
         this.debug = debug;
@@ -68,6 +72,7 @@ class SqliteKv implements Kv {
     }
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+        this.checkOpen('get');
         checkKeyNotEmpty(key);
         await Promise.resolve();
         throw new Error(`get(${JSON.stringify({ key, opts: { consistency } })}) not implemented`);
@@ -75,99 +80,79 @@ class SqliteKv implements Kv {
 
     // deno-lint-ignore no-explicit-any
     async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
+        this.checkOpen('getMany');
         keys.forEach(checkKeyNotEmpty);
         await Promise.resolve();
         throw new Error(`getMany(${JSON.stringify({ keys, opts: { consistency } })}) not implemented`);
     }
 
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
+        this.checkOpen('set');
         const result = await this.atomic().set(key, value, { expireIn }).commit();
         if (!result.ok) throw new Error(`set failed`); // should never happen, there are no checks
         return result;
     }
 
     async delete(key: KvKey): Promise<void> {
+        this.checkOpen('delete');
         const result = await this.atomic().delete(key).commit();
         if (!result.ok) throw new Error(`delete failed`); // should never happen, there are no checks
     }
 
-    list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
+    list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
+        this.checkOpen('list');
         if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
-        throw new Error(`list(${JSON.stringify({ selector, options })}) not implemented`);
+        if (!isRecord(options)) throw new Error(`Bad options: ${JSON.stringify(options)}`);
+        const outCursor: [ string ] = [ '' ];
+        const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
+        return new GenericKvListIterator<T>(generator, () => outCursor[0]);
     }
 
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
+        this.checkOpen('enqueue');
         const result = await this.atomic().enqueue(value, opts).commit();
         if (!result.ok) throw new Error(`enqueue failed`); // should never happen, there are no checks
         return result;
     }
 
     listenQueue(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
+        this.checkOpen('listenQueue');
         throw new Error(`listenQueue() not implemented`);
     }
 
     atomic(): AtomicOperation {
-        return new SqliteAtomicOperation(this.db, this.encodeV8);
+        const newVersionstamp = () => {
+            const version = ++this.version;
+            return `${version.toString().padStart(16, '0')}0000`;
+        };
+        return new GenericAtomicOperation((checks, mutations, enqueues) => {
+            this.checkOpen('commit');
+            if (checks.length === 0 && mutations.length === 0 && enqueues.length === 0) {
+                return Promise.resolve({ ok: true, versionstamp: newVersionstamp() });
+            }
+            throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues })}) not implemented`);
+        });
     }
 
     close(): void {
+        this.checkOpen('close');
+        this.closed = true;
         this.db.close();
     }
 
-}
+    //
 
-class SqliteAtomicOperation implements AtomicOperation {
-
-    private readonly db: DB;
-    private readonly encodeV8: EncodeV8;
-
-    constructor(db: DB, encodeV8: EncodeV8) {
-        this.db = db;
-        this.encodeV8 = encodeV8;
+    private checkOpen(method: string) {
+        if (this.closed) throw new Error(`Cannot call '.${method}' after '.close' is called`);
     }
 
-    check(...checks: AtomicCheck[]): this {
-        throw new Error(`check(${JSON.stringify({ checks })}) not implemented`);
-    }
+    // deno-lint-ignore require-yield
+    private async * listStream<T>(_outCursor: [ string ], selector: KvListSelector, options: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+        if ('prefix' in selector) {
+            return;
+        }
 
-    mutate(...mutations: KvMutation[]): this {
-        mutations.map(v => v.key).forEach(checkKeyNotEmpty);
-        mutations.forEach(v => v.type === 'set' && checkExpireIn(v.expireIn));
-        throw new Error(`mutate(${JSON.stringify({ mutations })}) not implemented`);
-    }
-
-    sum(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'sum', key, value: new _KvU64(n) });
-    }
-
-    min(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'min', key, value: new _KvU64(n) });
-    }
-
-    max(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'max', key, value: new _KvU64(n) });
-    }
-
-    set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
-        checkExpireIn(expireIn);
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'set', key, value, expireIn });
-    }
-
-    delete(key: KvKey): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'delete', key });
-    }
-
-    enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): this {
-        throw new Error(`enqueue(${JSON.stringify({ value, opts })}) not implemented`);
-    }
-
-    commit(): Promise<KvCommitResult | KvCommitError> {
-        throw new Error(`commit() not implemented`);
+        throw new Error(`list(${JSON.stringify({ selector, options })}) not implemented`);
     }
 
 }

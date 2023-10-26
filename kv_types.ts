@@ -196,7 +196,7 @@ export interface Kv {
 
     /**
      * Listen for queue values to be delivered from the database queue, which
-     * were enqueued with {@linkcode Kv.enqueue}. The provided handler
+     * were enqueued with {@linkcode .enqueue}. The provided handler
      * callback is invoked on every dequeued value. A failed callback
      * invocation is automatically retried multiple times until it succeeds
      * or until the maximum number of retries is reached.
