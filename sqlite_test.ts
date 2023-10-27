@@ -1,12 +1,13 @@
+import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
+import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
+import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.ts';
+import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
+import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
+import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
+import { checkString } from './check.ts';
 import { makeNativeService } from './client.ts';
 import { KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
-import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
-import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
-import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
-import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.ts';
-import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
-import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
 
 Deno.test({
     name: 'native-e2e',
@@ -42,6 +43,20 @@ async function endToEnd(service: KvService) {
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
         assertNotEquals(result.versionstamp, versionstamp1);
+    }
+
+    {
+        const result = await kv.set([ 'a' ], 'a');
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.get([ 'a' ]);
+        assertEquals(result.key, [ 'a' ]);
+        assertEquals(result.value, 'a');
+        checkString('versionstamp', result.versionstamp);
+        assertMatch(result.versionstamp, /^.+$/);
     }
 
     kv.close();

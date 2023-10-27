@@ -1,5 +1,6 @@
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
-import { checkKeyNotEmpty, isRecord } from './check.ts';
+import { checkKeyNotEmpty, checkMatches, isRecord } from './check.ts';
+import { packKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { GenericAtomicOperation, GenericKvListIterator } from './kv_util.ts';
@@ -43,6 +44,13 @@ export function makeSqliteService(opts?: SqliteServiceOptions): KvService {
     }
 }
 
+//
+
+const packVersionstamp = (version: number) => `${version.toString().padStart(16, '0')}0000`;
+
+const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
+
+//
 
 class SqliteKv implements Kv {
 
@@ -59,6 +67,14 @@ class SqliteKv implements Kv {
         this.debug = debug;
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
+        db.transaction(() => {
+            db.execute(`create table if not exists prop(name text primary key, value text not null)`);
+            db.execute(`create table if not exists kv(key blob primary key, value blob not null, versionstamp text not null)`);
+
+            const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
+            if (row) this.version = unpackVersionstamp(row[0]);
+        });
+        if (debug) console.log({ version: this.version });
     }
 
     static of(url: string | undefined, opts: SqliteServiceOptions = {}): Kv {
@@ -71,11 +87,17 @@ class SqliteKv implements Kv {
         return new SqliteKv(db, debug, encodeV8, decodeV8 );
     }
 
-    async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+    async get<T = unknown>(key: KvKey, { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
         this.checkOpen('get');
         checkKeyNotEmpty(key);
+        const keyArr = packKey(key);
         await Promise.resolve();
-        throw new Error(`get(${JSON.stringify({ key, opts: { consistency } })}) not implemented`);
+        const { db, decodeV8 } = this;
+        const [ row ] = db.query<[ Uint8Array, string ]>('select value, versionstamp from kv where key = ?', [ keyArr ]);
+        if (!row) return { key, value: null, versionstamp: null };
+        const [ encoded, versionstamp ] = row;
+        const value = decodeV8(encoded) as T;
+        return { key, value, versionstamp };
     }
 
     // deno-lint-ignore no-explicit-any
@@ -121,16 +143,29 @@ class SqliteKv implements Kv {
     }
 
     atomic(): AtomicOperation {
-        const newVersionstamp = () => {
-            const version = ++this.version;
-            return `${version.toString().padStart(16, '0')}0000`;
-        };
         return new GenericAtomicOperation((checks, mutations, enqueues) => {
             this.checkOpen('commit');
-            if (checks.length === 0 && mutations.length === 0 && enqueues.length === 0) {
-                return Promise.resolve({ ok: true, versionstamp: newVersionstamp() });
+            const notImplemented = () => new Error(`commit(${JSON.stringify({ checks, mutations, enqueues })}) not implemented`);
+            if (checks.length === 0 && enqueues.length === 0) {
+                const { db, encodeV8 } = this;
+                const newVersionstamp = packVersionstamp(++this.version);
+                db.transaction(() => {
+                    for (const mutation of mutations) {
+                        if (mutation.type === 'set') {
+                            const { key, value, expireIn } = mutation;
+                            if (typeof expireIn === 'number') throw notImplemented();
+                            const keyArr = packKey(key);
+                            const valueArr = encodeV8(value);
+                            db.query(`insert into kv(key, value, versionstamp) values (?, ?, ?) on conflict(key) do update set value=excluded.value, versionstamp=excluded.versionstamp`, [ keyArr, valueArr, newVersionstamp ]);
+                        } else {
+                            throw notImplemented();
+                        }
+                    }
+                    db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
+                });
+                return Promise.resolve({ ok: true, versionstamp: newVersionstamp });
             }
-            throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues })}) not implemented`);
+            throw notImplemented();
         });
     }
 
