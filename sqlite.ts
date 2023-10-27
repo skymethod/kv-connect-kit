@@ -1,3 +1,4 @@
+import { encodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches, isRecord } from './check.ts';
 import { packKey } from './kv_key.ts';
@@ -101,11 +102,21 @@ class SqliteKv implements Kv {
     }
 
     // deno-lint-ignore no-explicit-any
-    async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
+    async getMany<T>(keys: readonly KvKey[], { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
         this.checkOpen('getMany');
         keys.forEach(checkKeyNotEmpty);
         await Promise.resolve();
-        throw new Error(`getMany(${JSON.stringify({ keys, opts: { consistency } })}) not implemented`);
+        if (keys.length === 0) return [];
+        const { db, decodeV8 } = this;
+        const keyArrs = keys.map(packKey);
+        const keyHexes = keyArrs.map(encodeHex);
+        const placeholders = new Array(keyArrs.length).fill('?').join(', ');
+        const rows = db.query<[ Uint8Array, Uint8Array, string ]>(`select key, value, versionstamp from kv where key in (${placeholders})`, keyArrs);
+        const rowMap = new Map(rows.map(([ keyArr, valueArr, versionstamp ]) => [ encodeHex(keyArr), ({ value: decodeV8(valueArr), versionstamp })]));
+        return keys.map((key, i) => {
+            const row = rowMap.get(keyHexes[i]);
+            return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
+        });
     }
 
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {

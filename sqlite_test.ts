@@ -59,6 +59,71 @@ async function endToEnd(service: KvService) {
         assertMatch(result.versionstamp, /^.+$/);
     }
 
+    {
+        const result = await kv.set([ 'a' ], 'a2');
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.get([ 'a' ]);
+        assertEquals(result.key, [ 'a' ]);
+        assertEquals(result.value, 'a2');
+        checkString('versionstamp', result.versionstamp);
+        assertMatch(result.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.getMany([]);
+        assertEquals(result.length, 0);
+    }
+
+    {
+        const result = await kv.getMany([ [ 'a' ] ]);
+        assertEquals(result.length, 1);
+        const [ first ] = result;
+        assertEquals(first.key, [ 'a' ]);
+        assertEquals(first.value, 'a2');
+        checkString('versionstamp', first.versionstamp);
+        assertMatch(first.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.set([ 'b' ], 'b');
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.getMany([ [ 'a' ], [ 'b' ] ]);
+        assertEquals(result.length, 2);
+        const [ first, second ] = result;
+        assertEquals(first.key, [ 'a' ]);
+        assertEquals(first.value, 'a2');
+        checkString('versionstamp', first.versionstamp);
+        assertMatch(first.versionstamp, /^.+$/);
+
+        assertEquals(second.key, [ 'b' ]);
+        assertEquals(second.value, 'b');
+        checkString('versionstamp', second.versionstamp);
+        assertMatch(second.versionstamp, /^.+$/);
+    }
+
+    {
+        const result = await kv.getMany([ [ 'a' ], [ 'a' ] ]);
+        assertEquals(result.length, 2);
+        const [ first, second ] = result;
+        assertEquals(first.key, [ 'a' ]);
+        assertEquals(first.value, 'a2');
+        checkString('versionstamp', first.versionstamp);
+        assertMatch(first.versionstamp, /^.+$/);
+
+        assertEquals(second.key, [ 'a' ]);
+        assertEquals(second.value, 'a2');
+        checkString('versionstamp', second.versionstamp);
+        assertMatch(second.versionstamp, /^.+$/);
+    }
+
     kv.close();
 
     // post-close assertions
