@@ -162,12 +162,15 @@ class SqliteKv implements Kv {
                 const newVersionstamp = packVersionstamp(++this.version);
                 db.transaction(() => {
                     for (const mutation of mutations) {
+                        const { key } = mutation;
+                        const keyArr = packKey(key);
                         if (mutation.type === 'set') {
-                            const { key, value, expireIn } = mutation;
+                            const { value, expireIn } = mutation;
                             if (typeof expireIn === 'number') throw notImplemented();
-                            const keyArr = packKey(key);
                             const valueArr = encodeV8(value);
                             db.query(`insert into kv(key, value, versionstamp) values (?, ?, ?) on conflict(key) do update set value=excluded.value, versionstamp=excluded.versionstamp`, [ keyArr, valueArr, newVersionstamp ]);
+                        } else if (mutation.type === 'delete') {
+                            db.query(`delete from kv where key = ?`, [ keyArr ]);
                         } else {
                             throw notImplemented();
                         }

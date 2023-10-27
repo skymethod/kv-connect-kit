@@ -124,6 +124,22 @@ async function endToEnd(service: KvService) {
         assertMatch(second.versionstamp, /^.+$/);
     }
 
+    {
+        await kv.delete([ 'b' ]);
+        const result = await kv.get([ 'b' ]);
+        assertEquals(result.key, [ 'b' ]);
+        assertEquals(result.value, null);
+        assertEquals(result.versionstamp, null);
+    }
+
+    {
+        await kv.delete([ 'b' ]);
+        const result = await kv.get([ 'b' ]);
+        assertEquals(result.key, [ 'b' ]);
+        assertEquals(result.value, null);
+        assertEquals(result.versionstamp, null);
+    }
+
     kv.close();
 
     // post-close assertions
