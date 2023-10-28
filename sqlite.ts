@@ -63,6 +63,15 @@ function querySingleValue<T>(key: KvKey, db: DB, decodeV8: DecodeV8): { value: T
     return { value, versionstamp };
 }
 
+function runExpirerTransaction(db: DB, debug: boolean): number | undefined {
+    return db.transaction(() => {
+        db.query(`delete from kv where expires <= ?`, [ Date.now() ]);
+        if (debug) console.log(`runExpirerTransaction: expirer deleted ${db.changes}`);
+        const [ row ] = db.query<[ number ]>(`select min(expires) from kv`);
+        return row?.at(0) ?? undefined;
+    });
+}
+
 //
 
 class SqliteKv implements Kv {
@@ -74,6 +83,8 @@ class SqliteKv implements Kv {
 
     private closed = false;
     private version = 0;
+    private minExpires: number | undefined;
+    private expirerTimeout = 0;
 
     private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8) {
         this.db = db;
@@ -82,12 +93,14 @@ class SqliteKv implements Kv {
         this.decodeV8 = decodeV8;
         db.transaction(() => {
             db.execute(`create table if not exists prop(name text primary key, value text not null)`);
-            db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null)`);
+            db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null, expires int)`);
+            this.minExpires = runExpirerTransaction(db, debug);
 
             const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
             if (row) this.version = unpackVersionstamp(row[0]);
         });
-        if (debug) console.log({ version: this.version });
+        if (this.minExpires !== undefined) this.rescheduleExpirer(this.minExpires);
+        if (debug) console.log(`new SqliteKV: version=${this.version}`);
     }
 
     static of(url: string | undefined, opts: SqliteServiceOptions = {}): Kv {
@@ -169,6 +182,7 @@ class SqliteKv implements Kv {
             const { db, encodeV8, decodeV8 } = this;
             await Promise.resolve();
             return db.transaction(() => {
+                let minExpires: number | undefined;
                 for (const { key, versionstamp } of checks) {
                     if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new AssertionError(`Bad 'versionstamp': ${versionstamp}`);
                     const existing = querySingleValue(key, db, decodeV8);
@@ -181,9 +195,11 @@ class SqliteKv implements Kv {
                     const keyBytes = packKey(key);
                     if (mutation.type === 'set') {
                         const { value, expireIn } = mutation;
-                        if (typeof expireIn === 'number') throw notImplemented();
+                        const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : undefined;
+                        if (expires !== undefined) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
                         const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                        db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp`, [ keyBytes, bytes, encoding, newVersionstamp ]);
+                        db.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
+                            [ keyBytes, bytes, encoding, newVersionstamp, expires ]);
                     } else if (mutation.type === 'delete') {
                         db.query(`delete from kv where key = ?`, [ keyBytes ]);
                     } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
@@ -204,12 +220,14 @@ class SqliteKv implements Kv {
                     }
                 }
                 db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
+                if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
                 return { ok: true, versionstamp: newVersionstamp };
             });
         });
     }
 
     close(): void {
+        clearTimeout(this.expirerTimeout);
         this.checkOpen('close');
         this.closed = true;
         this.db.close();
@@ -228,6 +246,27 @@ class SqliteKv implements Kv {
         }
 
         throw new Error(`list(${JSON.stringify({ selector, options })}) not implemented`);
+    }
+
+    private rescheduleExpirer(expires: number) {
+        const { minExpires, debug, expirerTimeout } = this;
+        if (minExpires !== undefined && minExpires < expires) return;
+        this.minExpires = expires;
+        clearTimeout(expirerTimeout);
+        const delay = expires - Date.now();
+        if (debug) console.log(`rescheduleExpirer: run in ${delay}ms`);
+        this.expirerTimeout = setTimeout(() => this.runExpirer(), delay);
+    }
+
+    private runExpirer() {
+        const { db, debug } = this;
+        const newMinExpires = runExpirerTransaction(db, debug);
+        this.minExpires = newMinExpires;
+        if (newMinExpires !== undefined) {
+            this.rescheduleExpirer(newMinExpires);
+        } else {
+            clearTimeout(this.expirerTimeout);
+        }
     }
 
 }

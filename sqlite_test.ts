@@ -14,18 +14,18 @@ import { makeSqliteService } from './sqlite.ts';
 Deno.test({
     name: 'native-e2e',
     fn: async () => {
-        await endToEnd(makeNativeService())
+        await endToEnd(makeNativeService(), 'native')
     }
 });
 
 Deno.test({
     name: 'sqlite-e2e',
     fn: async () => {
-        await endToEnd(makeSqliteService())
+        await endToEnd(makeSqliteService({ debug: false }), 'sqlite')
     }
 });
 
-async function endToEnd(service: KvService) {
+async function endToEnd(service: KvService, type: string) {
 
     const kv = await service.openKv(':memory:');
 
@@ -196,6 +196,18 @@ async function endToEnd(service: KvService) {
         assert((await kv.atomic().check({ key: [ 'a' ], versionstamp: existingVersionstamp }).commit()).ok);
     }
 
+    {
+        // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
+        // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
+
+        if (type !== 'native') {
+            await kv.set([ 'e' ], 'e', { expireIn: 100 });
+            assertEquals((await kv.get([ 'e' ])).value, 'e');
+            await sleep(200);
+            assertEquals((await kv.get([ 'e' ])).value, null);
+        }
+    }
+
     kv.close();
 
     // post-close assertions
@@ -207,9 +219,13 @@ async function endToEnd(service: KvService) {
     assertRejects(async () => await logAndRethrow(() => kv.get([ 'a' ])));
     assertRejects(async () => await logAndRethrow(() => kv.getMany([ [ 'a' ] ])));
     assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
-    // assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
+    if (type !== 'native') assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
     assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
    
+}
+
+function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function toArray<T>(iter: AsyncIterableIterator<T>): Promise<T[]> {
