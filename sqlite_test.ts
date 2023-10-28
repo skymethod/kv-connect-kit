@@ -1,5 +1,7 @@
 import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
 import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
+import { assertExists } from "https://deno.land/std@0.204.0/assert/assert_exists.ts";
+import { assertFalse } from 'https://deno.land/std@0.204.0/assert/assert_false.ts';
 import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.ts';
 import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
 import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
@@ -170,7 +172,6 @@ async function endToEnd(service: KvService) {
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
     }
 
-
     {
         const result = await kv.atomic().min([ 'u1' ], 2n).commit();
         assert(result.ok);
@@ -185,6 +186,14 @@ async function endToEnd(service: KvService) {
         assertMatch(result.versionstamp, /^.+$/);
 
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
+    }
+
+    {
+        const { versionstamp: existingVersionstamp } = await kv.get([ 'a' ]);
+        assertExists(existingVersionstamp);
+        assertFalse((await kv.atomic().check({ key: [ 'a' ], versionstamp: null }).commit()).ok);
+        assertFalse((await kv.atomic().check({ key: [ 'a' ], versionstamp: '1' + existingVersionstamp.substring(1) }).commit()).ok);
+        assert((await kv.atomic().check({ key: [ 'a' ], versionstamp: existingVersionstamp }).commit()).ok);
     }
 
     kv.close();

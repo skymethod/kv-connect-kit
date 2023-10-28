@@ -50,6 +50,8 @@ const packVersionstamp = (version: number) => `${version.toString().padStart(16,
 
 const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
 
+const isValidVersionstamp = (versionstamp: string) => /^(\d{16})0000$/.test(versionstamp);
+
 const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
 
 function querySingleValue<T>(key: KvKey, db: DB, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
@@ -160,45 +162,50 @@ class SqliteKv implements Kv {
     }
 
     atomic(): AtomicOperation {
-        return new GenericAtomicOperation((checks, mutations, enqueues) => {
+        return new GenericAtomicOperation(async (checks, mutations, enqueues) => {
             this.checkOpen('commit');
             const notImplemented = () => new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
-            if (checks.length === 0 && enqueues.length === 0) {
-                const { db, encodeV8, decodeV8 } = this;
+            if (enqueues.length > 0) throw notImplemented();
+            const { db, encodeV8, decodeV8 } = this;
+            await Promise.resolve();
+            return db.transaction(() => {
+                for (const { key, versionstamp } of checks) {
+                    if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new AssertionError(`Bad 'versionstamp': ${versionstamp}`);
+                    const existing = querySingleValue(key, db, decodeV8);
+                    if (versionstamp === null && existing) return { ok: false };
+                    if (typeof versionstamp === 'string' && existing?.versionstamp !== versionstamp) return { ok: false };
+                }
                 const newVersionstamp = packVersionstamp(++this.version);
-                db.transaction(() => {
-                    for (const mutation of mutations) {
-                        const { key } = mutation;
-                        const keyBytes = packKey(key);
-                        if (mutation.type === 'set') {
-                            const { value, expireIn } = mutation;
-                            if (typeof expireIn === 'number') throw notImplemented();
-                            const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp`, [ keyBytes, bytes, encoding, newVersionstamp ]);
-                        } else if (mutation.type === 'delete') {
-                            db.query(`delete from kv where key = ?`, [ keyBytes ]);
-                        } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
-                            const existing = querySingleValue<_KvU64>(key, db, decodeV8);
-                            if (existing === undefined) {
-                                const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
-                                db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
-                            } else {
-                                assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
-                                const result = mutation.type === 'min' ? existing.value.min(mutation.value)
-                                    : mutation.type === 'max' ? existing.value.max(mutation.value)
-                                    : existing.value.sum(mutation.value);
-                                const { data: bytes, encoding } = packKvValue(result, encodeV8);
-                                db.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
-                            }
+                for (const mutation of mutations) {
+                    const { key } = mutation;
+                    const keyBytes = packKey(key);
+                    if (mutation.type === 'set') {
+                        const { value, expireIn } = mutation;
+                        if (typeof expireIn === 'number') throw notImplemented();
+                        const { data: bytes, encoding } = packKvValue(value, encodeV8);
+                        db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp`, [ keyBytes, bytes, encoding, newVersionstamp ]);
+                    } else if (mutation.type === 'delete') {
+                        db.query(`delete from kv where key = ?`, [ keyBytes ]);
+                    } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
+                        const existing = querySingleValue<_KvU64>(key, db, decodeV8);
+                        if (existing === undefined) {
+                            const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
+                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                         } else {
-                            throw notImplemented();
+                            assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
+                            const result = mutation.type === 'min' ? existing.value.min(mutation.value)
+                                : mutation.type === 'max' ? existing.value.max(mutation.value)
+                                : existing.value.sum(mutation.value);
+                            const { data: bytes, encoding } = packKvValue(result, encodeV8);
+                            db.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
                         }
+                    } else {
+                        throw notImplemented();
                     }
-                    db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
-                });
-                return Promise.resolve({ ok: true, versionstamp: newVersionstamp });
-            }
-            throw notImplemented();
+                }
+                db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
+                return { ok: true, versionstamp: newVersionstamp };
+            });
         });
     }
 
