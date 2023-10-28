@@ -1,14 +1,12 @@
+import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { encodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches, isRecord } from './check.ts';
 import { packKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { GenericAtomicOperation, GenericKvListIterator } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, packKvValue, readValue } from './kv_util.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
-
-type EncodeV8 = (value: unknown) => Uint8Array;
-type DecodeV8 = (bytes: Uint8Array) => unknown;
 
 export interface SqliteServiceOptions {
 
@@ -70,7 +68,7 @@ class SqliteKv implements Kv {
         this.decodeV8 = decodeV8;
         db.transaction(() => {
             db.execute(`create table if not exists prop(name text primary key, value text not null)`);
-            db.execute(`create table if not exists kv(key blob primary key, value blob not null, versionstamp text not null)`);
+            db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null)`);
 
             const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
             if (row) this.version = unpackVersionstamp(row[0]);
@@ -94,10 +92,10 @@ class SqliteKv implements Kv {
         const keyArr = packKey(key);
         await Promise.resolve();
         const { db, decodeV8 } = this;
-        const [ row ] = db.query<[ Uint8Array, string ]>('select value, versionstamp from kv where key = ?', [ keyArr ]);
+        const [ row ] = db.query<[ Uint8Array, string, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyArr ]);
         if (!row) return { key, value: null, versionstamp: null };
-        const [ encoded, versionstamp ] = row;
-        const value = decodeV8(encoded) as T;
+        const [ bytes, encoding, versionstamp ] = row;
+        const value = readValue(bytes, encoding as KvValueEncoding, decodeV8) as T;
         return { key, value, versionstamp };
     }
 
@@ -111,8 +109,8 @@ class SqliteKv implements Kv {
         const keyArrs = keys.map(packKey);
         const keyHexes = keyArrs.map(encodeHex);
         const placeholders = new Array(keyArrs.length).fill('?').join(', ');
-        const rows = db.query<[ Uint8Array, Uint8Array, string ]>(`select key, value, versionstamp from kv where key in (${placeholders})`, keyArrs);
-        const rowMap = new Map(rows.map(([ keyArr, valueArr, versionstamp ]) => [ encodeHex(keyArr), ({ value: decodeV8(valueArr), versionstamp })]));
+        const rows = db.query<[ Uint8Array, Uint8Array, string, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyArrs);
+        const rowMap = new Map(rows.map(([ keyArr, bytes, encoding , versionstamp ]) => [ encodeHex(keyArr), ({ value: readValue(bytes, encoding as KvValueEncoding, decodeV8), versionstamp })]));
         return keys.map((key, i) => {
             const row = rowMap.get(keyHexes[i]);
             return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
@@ -122,20 +120,20 @@ class SqliteKv implements Kv {
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
         this.checkOpen('set');
         const result = await this.atomic().set(key, value, { expireIn }).commit();
-        if (!result.ok) throw new Error(`set failed`); // should never happen, there are no checks
+        if (!result.ok) throw new AssertionError(`set failed`); // should never happen, there are no checks
         return result;
     }
 
     async delete(key: KvKey): Promise<void> {
         this.checkOpen('delete');
         const result = await this.atomic().delete(key).commit();
-        if (!result.ok) throw new Error(`delete failed`); // should never happen, there are no checks
+        if (!result.ok) throw new AssertionError(`delete failed`); // should never happen, there are no checks
     }
 
     list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
         this.checkOpen('list');
-        if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
-        if (!isRecord(options)) throw new Error(`Bad options: ${JSON.stringify(options)}`);
+        if (!isRecord(selector)) throw new AssertionError(`Bad selector: ${JSON.stringify(selector)}`);
+        if (!isRecord(options)) throw new AssertionError(`Bad options: ${JSON.stringify(options)}`);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new GenericKvListIterator<T>(generator, () => outCursor[0]);
@@ -144,7 +142,7 @@ class SqliteKv implements Kv {
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
         this.checkOpen('enqueue');
         const result = await this.atomic().enqueue(value, opts).commit();
-        if (!result.ok) throw new Error(`enqueue failed`); // should never happen, there are no checks
+        if (!result.ok) throw new AssertionError(`enqueue failed`); // should never happen, there are no checks
         return result;
     }
 
@@ -167,8 +165,8 @@ class SqliteKv implements Kv {
                         if (mutation.type === 'set') {
                             const { value, expireIn } = mutation;
                             if (typeof expireIn === 'number') throw notImplemented();
-                            const valueArr = encodeV8(value);
-                            db.query(`insert into kv(key, value, versionstamp) values (?, ?, ?) on conflict(key) do update set value=excluded.value, versionstamp=excluded.versionstamp`, [ keyArr, valueArr, newVersionstamp ]);
+                            const { data: bytes, encoding } = packKvValue(value, encodeV8);
+                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes=excluded.bytes, encoding=excluded.encoding, versionstamp=excluded.versionstamp`, [ keyArr, bytes, encoding, newVersionstamp ]);
                         } else if (mutation.type === 'delete') {
                             db.query(`delete from kv where key = ?`, [ keyArr ]);
                         } else {
@@ -192,7 +190,7 @@ class SqliteKv implements Kv {
     //
 
     private checkOpen(method: string) {
-        if (this.closed) throw new Error(`Cannot call '.${method}' after '.close' is called`);
+        if (this.closed) throw new AssertionError(`Cannot call '.${method}' after '.close' is called`);
     }
 
     // deno-lint-ignore require-yield

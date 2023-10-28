@@ -1,19 +1,17 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
-import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
-import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, KvCheck, ReadRange, SnapshotRead, SnapshotReadOutput, KvMutation as KvMutationMessage, Enqueue, KvValueEncoding, KvValue } from './proto/messages/datapath/index.ts';
-import { encode as encodeBase64, decode as decodeBase64 } from './proto/runtime/base64.ts';
+import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
-import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
-import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { GenericKvListIterator } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericKvListIterator, packKvValue, readValue } from './kv_util.ts';
+import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
+import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
+import { AtomicWrite, AtomicWriteOutput, Enqueue, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
+import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
+import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
 
-type EncodeV8 = (value: unknown) => Uint8Array;
-type DecodeV8 = (bytes: Uint8Array) => unknown;
 type Fetcher = typeof fetch;
 
 export interface RemoteServiceOptions {
@@ -165,32 +163,6 @@ function snapshotReadToString(req: SnapshotRead): string {
 
 function atomicWriteToString(req: AtomicWrite): string {
     return JSON.stringify(encodeJsonAtomicWrite(req));
-}
-
-function unpackKvu(bytes: Uint8Array): _KvU64 {
-    if (bytes.length !== 8) throw new Error();
-    if (bytes.buffer.byteLength !== 8) bytes = new Uint8Array(bytes);
-    const rt = new DataView(bytes.buffer).getBigUint64(0, true);
-    return new _KvU64(rt);
-}
-
-function packKvu(value: _KvU64): Uint8Array {
-    const rt = new Uint8Array(8);
-    new DataView(rt.buffer).setBigUint64(0, value.value, true);
-    return rt;
-}
-
-function readValue(bytes: Uint8Array, encoding: KvValueEncoding, decodeV8: DecodeV8) {
-    if (encoding === 'VE_V8') return decodeV8(bytes);
-    if (encoding === 'VE_LE64') return unpackKvu(bytes);
-    if (encoding === 'VE_BYTES') return bytes;
-    throw new Error(`Unsupported encoding: ${encoding} [${[...bytes].join(', ')}]`);
-}
-
-function packKvValue(value: unknown, encodeV8: EncodeV8): KvValue {
-    if (value instanceof _KvU64) return { encoding: 'VE_LE64', data: packKvu(value) };
-    if (value instanceof Uint8Array) return { encoding: 'VE_BYTES', data: value };
-    return { encoding: 'VE_V8',  data: encodeV8(value) };
 }
 
 //
