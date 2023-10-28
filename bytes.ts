@@ -1,16 +1,8 @@
-import { encode as _encodeHex, decode as _decodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
+export { encodeHex, decodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
 
 export function checkEnd(bytes: Uint8Array, pos: number) {
     const extra = bytes.length - pos;
     if (extra > 0) throw new Error(`Unexpected trailing bytes: ${extra}`);
-}
-
-export function encodeHex(arr: Uint8Array): string {
-    return decoder.decode(_encodeHex(arr));
-}
-
-export function decodeHex(str: string): Uint8Array {
-    return _decodeHex(new TextEncoder().encode(str));
 }
 
 export function equalBytes(lhs: Uint8Array, rhs: Uint8Array): boolean {
@@ -35,7 +27,3 @@ export function computeBigintMinimumNumberOfBytes(val: bigint): number {
     }
     return n;
 }
-
-//
-
-const decoder = new TextDecoder();

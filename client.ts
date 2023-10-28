@@ -4,11 +4,10 @@ import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, GenericKvListIterator, packKvValue, readValue } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericKvListIterator, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
 import { AtomicWrite, AtomicWriteOutput, Enqueue, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
-import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
 
@@ -78,22 +77,6 @@ export function makeNativeService(): KvService {
 //
 
 const emptyVersionstamp = new Uint8Array(10);
-
-type Cursor = { lastYieldedKeyBytes: Uint8Array }
-
-function packCursor({ lastYieldedKeyBytes }: Cursor): string {
-    return encodeBase64(JSON.stringify({ lastYieldedKeyBytes: encodeHex(lastYieldedKeyBytes) }));
-}
-
-function unpackCursor(str: string): Cursor {
-    try {
-        const { lastYieldedKeyBytes } = JSON.parse(new TextDecoder().decode(decodeBase64(str)));
-        if (typeof lastYieldedKeyBytes === 'string') return { lastYieldedKeyBytes: decodeHex(lastYieldedKeyBytes) };
-    } catch {
-        // noop
-    }
-    throw new Error(`Invalid cursor`);
-}
 
 function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
     return {
@@ -355,6 +338,7 @@ class RemoteKv implements Kv {
         const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
         let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
         let pass = 0;
+        const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
         while (true) {
             pass++;
             // console.log({ pass });
@@ -362,9 +346,8 @@ class RemoteKv implements Kv {
             let start: Uint8Array | undefined;
             let end: Uint8Array | undefined;
             if ('prefix' in selector) {
-                const prefix = packKey(selector.prefix);
-                start = 'start' in selector ? packKey(selector.start) : prefix;
-                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefix, 0xff ]);
+                start = 'start' in selector ? packKey(selector.start) : prefixBytes;
+                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefixBytes!, 0xff ]);
             } else {
                 start = packKey(selector.start);
                 end = packKey(selector.end);
@@ -383,7 +366,7 @@ class RemoteKv implements Kv {
             let entries = 0;
             for (const range of res.ranges) {
                 for (const entry of range.values) {
-                    if (entries++ === 0 && lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key)) continue;
+                    if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key) || prefixBytes && equalBytes(prefixBytes, entry.key))) continue;
                     const key = unpackKey(entry.key);
                     const value = readValue(entry.value, entry.encoding, decodeV8) as T;
                     const versionstamp = encodeHex(entry.versionstamp);

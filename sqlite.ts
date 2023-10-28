@@ -1,12 +1,12 @@
 import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_instance_of.ts';
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
-import { encodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
+import { encodeHex, equalBytes } from './bytes.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches, isRecord } from './check.ts';
-import { packKey } from './kv_key.ts';
+import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, packKvValue, readValue } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 export interface SqliteServiceOptions {
@@ -56,10 +56,10 @@ const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toStr
 
 function querySingleValue<T>(key: KvKey, db: DB, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
     const keyBytes = packKey(key);
-    const [ row ] = db.query<[ Uint8Array, string, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
+    const [ row ] = db.query<[ Uint8Array, KvValueEncoding, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
     if (!row) return undefined;
     const [ bytes, encoding, versionstamp ] = row;
-    const value = readValue(bytes, encoding as KvValueEncoding, decodeV8) as T;
+    const value = readValue(bytes, encoding, decodeV8) as T;
     return { value, versionstamp };
 }
 
@@ -132,8 +132,8 @@ class SqliteKv implements Kv {
         const keyBytesArr = keys.map(packKey);
         const keyHexes = keyBytesArr.map(encodeHex);
         const placeholders = new Array(keyBytesArr.length).fill('?').join(', ');
-        const rows = db.query<[ Uint8Array, Uint8Array, string, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyBytesArr);
-        const rowMap = new Map(rows.map(([ keyBytes, bytes, encoding , versionstamp ]) => [ encodeHex(keyBytes), ({ value: readValue(bytes, encoding as KvValueEncoding, decodeV8), versionstamp })]));
+        const rows = db.query<[ Uint8Array, Uint8Array, KvValueEncoding, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyBytesArr);
+        const rowMap = new Map(rows.map(([ keyBytes, bytes, encoding , versionstamp ]) => [ encodeHex(keyBytes), ({ value: readValue(bytes, encoding, decodeV8), versionstamp })]));
         return keys.map((key, i) => {
             const row = rowMap.get(keyHexes[i]);
             return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
@@ -239,15 +239,6 @@ class SqliteKv implements Kv {
         if (this.closed) throw new AssertionError(`Cannot call '.${method}' after '.close' is called`);
     }
 
-    // deno-lint-ignore require-yield
-    private async * listStream<T>(_outCursor: [ string ], selector: KvListSelector, options: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
-        if ('prefix' in selector) {
-            return;
-        }
-
-        throw new Error(`list(${JSON.stringify({ selector, options })}) not implemented`);
-    }
-
     private rescheduleExpirer(expires: number) {
         const { minExpires, debug, expirerTimeout } = this;
         if (minExpires !== undefined && minExpires < expires) return;
@@ -266,6 +257,53 @@ class SqliteKv implements Kv {
             this.rescheduleExpirer(newMinExpires);
         } else {
             clearTimeout(this.expirerTimeout);
+        }
+    }
+
+    private async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+        const { db, decodeV8 } = this;
+        let yielded = 0;
+        if (typeof limit === 'number' && yielded >= limit) return;
+        const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
+        let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
+        let pass = 0;
+        const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
+        while (true) {
+            pass++;
+            // console.log({ pass });
+            let start: Uint8Array | undefined;
+            let end: Uint8Array | undefined;
+            if ('prefix' in selector) {
+                start = 'start' in selector ? packKey(selector.start) : prefixBytes;
+                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefixBytes!, 0xff ]);
+            } else {
+                start = packKey(selector.start);
+                end = packKey(selector.end);
+            }
+            if (reverse) {
+                end = lastYieldedKeyBytes ?? end;
+            } else {
+                start = lastYieldedKeyBytes ?? start;
+            }
+           
+            if (start === undefined || end === undefined) throw new Error();
+            const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
+
+            const rows = db.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
+
+            let entries = 0;
+            for (const [ keyBytes, bytes, encoding, versionstamp ] of rows) {
+                if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, keyBytes) || prefixBytes && equalBytes(prefixBytes, keyBytes))) continue;
+                const key = unpackKey(keyBytes);
+                const value = readValue(bytes, encoding, decodeV8) as T;
+                lastYieldedKeyBytes = keyBytes;
+                outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield
+                yield { key, value, versionstamp };
+                yielded++;
+                // console.log({ yielded, entries, limit });
+                if (typeof limit === 'number' && yielded >= limit) return;
+            }
+            if (entries < batchLimit) return;
         }
     }
 

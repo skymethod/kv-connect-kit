@@ -1,6 +1,8 @@
+import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn } from './check.ts';
 import { AtomicCheck, AtomicOperation, KvCommitError, KvCommitResult, KvEntry, KvKey, KvListIterator, KvMutation } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
+import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
 
 export type EncodeV8 = (value: unknown) => Uint8Array;
 export type DecodeV8 = (bytes: Uint8Array) => unknown;
@@ -40,6 +42,22 @@ export function packKvValue(value: unknown, encodeV8: EncodeV8): KvValue {
     if (value instanceof _KvU64) return { encoding: 'VE_LE64', data: packKvu(value) };
     if (value instanceof Uint8Array) return { encoding: 'VE_BYTES', data: value };
     return { encoding: 'VE_V8',  data: encodeV8(value) };
+}
+
+export type Cursor = { lastYieldedKeyBytes: Uint8Array }
+
+export function packCursor({ lastYieldedKeyBytes }: Cursor): string {
+    return encodeBase64(JSON.stringify({ lastYieldedKeyBytes: encodeHex(lastYieldedKeyBytes) }));
+}
+
+export function unpackCursor(str: string): Cursor {
+    try {
+        const { lastYieldedKeyBytes } = JSON.parse(new TextDecoder().decode(decodeBase64(str)));
+        if (typeof lastYieldedKeyBytes === 'string') return { lastYieldedKeyBytes: decodeHex(lastYieldedKeyBytes) };
+    } catch {
+        // noop
+    }
+    throw new Error(`Invalid cursor`);
 }
 
 export class GenericKvListIterator<T> implements KvListIterator<T> {

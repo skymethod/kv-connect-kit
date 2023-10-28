@@ -1,36 +1,83 @@
 import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
 import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
-import { assertExists } from "https://deno.land/std@0.204.0/assert/assert_exists.ts";
+import { assertExists } from 'https://deno.land/std@0.204.0/assert/assert_exists.ts';
 import { assertFalse } from 'https://deno.land/std@0.204.0/assert/assert_false.ts';
 import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.ts';
 import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
 import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
 import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
+import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
+import { chunk } from 'https://deno.land/std@0.204.0/collections/chunk.ts';
 import { checkString } from './check.ts';
 import { makeNativeService } from './client.ts';
-import { KvService } from './kv_types.ts';
+import { KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 
+const flags = parseFlags(Deno.args);
+const debug = !!flags.debug;
+
 Deno.test({
-    name: 'native-e2e',
+    name: 'e2e-native-memory',
     fn: async () => {
-        await endToEnd(makeNativeService(), 'native')
+        await endToEnd(makeNativeService(), { type: 'native', path: ':memory:' });
     }
 });
 
 Deno.test({
-    name: 'sqlite-e2e',
+    name: 'e2e-sqlite-memory',
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug: false }), 'sqlite')
+        await endToEnd(makeSqliteService({ debug }), { type: 'sqlite', path: ':memory:' });
     }
 });
 
-async function endToEnd(service: KvService, type: string) {
+//
 
-    const kv = await service.openKv(':memory:');
+const denoKvAccessToken = (await Deno.permissions.query({ name: 'env', variable: 'DENO_KV_ACCESS_TOKEN' })).state === 'granted' && Deno.env.get('DENO_KV_ACCESS_TOKEN');
+const denoKvDatabaseId = (await Deno.permissions.query({ name: 'env', variable: 'DENO_KV_DATABASE_ID' })).state === 'granted' && Deno.env.get('DENO_KV_DATABASE_ID');
 
-    const items = await toArray(kv.list({ prefix: [] }));
-    assertEquals(items.length, 0);
+async function clear(service: KvService, path: string) {
+    const kv = await service.openKv(path);
+    const keys: KvKey[] = [];
+    for await (const { key } of kv.list({ prefix: [] })) {
+        keys.push(key);
+    }
+    for (const batch of chunk(keys, 1000)) {
+        let tx = kv.atomic();
+        for (const key of batch) {
+            tx = tx.delete(key);
+        }
+        await tx.commit();
+    }
+    kv.close();
+}
+
+if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
+    Deno.test({
+        name: 'e2e-native-remote',
+        fn: async () => {
+            const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
+            const service = makeNativeService();
+            await clear(service, path);
+            try {
+                await endToEnd(service, { type: 'native', path });
+            } finally {
+                await clear(service, path);
+            }
+        },
+
+    });
+}
+
+//
+
+async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'sqlite', path: string }) {
+
+    const kv = await service.openKv(path);
+
+    {
+        const items = await toArray(kv.list({ prefix: [] }));
+        assertEquals(items.length, 0);
+    }
 
     let versionstamp1: string
     {
@@ -200,12 +247,36 @@ async function endToEnd(service: KvService, type: string) {
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type !== 'native') {
+        if (type !== 'native') { // native doesn't do timely-enough expiration
+            assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
+            assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
+            await kv.set([ 'ne1' ], 'ne1', { expireIn: undefined });
+            await kv.set([ 'ne2' ], 'ne2');
             assertEquals((await kv.get([ 'e' ])).value, 'e');
+            assertEquals((await kv.get([ 'ne1' ])).value, 'ne1');
+            assertEquals((await kv.get([ 'ne2' ])).value, 'ne2');
             await sleep(200);
             assertEquals((await kv.get([ 'e' ])).value, null);
+            assertEquals((await kv.get([ 'ne1' ])).value, 'ne1');
+            assertEquals((await kv.get([ 'ne2' ])).value, 'ne2');
         }
+    }
+
+    await kv.atomic().delete([ 'a' ]).delete([ 'u1' ]).delete([ 'ne1' ]).delete([ 'ne2' ]).commit();
+
+    const assertList = async (selector: KvListSelector, options: KvListOptions, expected: Record<string, unknown>) => {
+        const items = await toArray(kv.list(selector, options));
+        const itemArr = items.map(v => [ v.key, v.value ]);
+        const expectedArr = Object.entries(expected).map(v => [ v[0].split('_'), v[1] ]);
+        assertEquals(itemArr, expectedArr);
+    }
+
+    {
+        await assertList({ prefix: [] }, {}, {});
+        await kv.set([ 'a' ], 'a');
+        await assertList({ prefix: [] }, {}, { a: 'a' });
+        await assertList({ prefix: [ 'a' ] }, {}, {});
     }
 
     kv.close();
