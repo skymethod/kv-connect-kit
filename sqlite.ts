@@ -177,14 +177,17 @@ class SqliteKv implements Kv {
                             db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                         } else if (mutation.type === 'delete') {
                             db.query(`delete from kv where key = ?`, [ keyBytes ]);
-                        } else if (mutation.type === 'sum') {
+                        } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
                             const existing = querySingleValue<_KvU64>(key, db, decodeV8);
                             if (existing === undefined) {
                                 const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
                                 db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                             } else {
-                                assertInstanceOf(existing.value, _KvU64, `Can only 'sum' on KvU64`);
-                                const { data: bytes, encoding } = packKvValue(existing.value.sum(mutation.value), encodeV8);
+                                assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
+                                const result = mutation.type === 'min' ? existing.value.min(mutation.value)
+                                    : mutation.type === 'max' ? existing.value.max(mutation.value)
+                                    : existing.value.sum(mutation.value);
+                                const { data: bytes, encoding } = packKvValue(result, encodeV8);
                                 db.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
                             }
                         } else {

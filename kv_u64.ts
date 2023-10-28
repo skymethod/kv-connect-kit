@@ -16,4 +16,12 @@ export class _KvU64 implements KvU64 {
         return new _KvU64((this.value + other.value) % (1n << 64n));
     }
 
+    min(other: KvU64): KvU64 {
+        return other.value < this.value ? other : this;
+    }
+
+    max(other: KvU64): KvU64 {
+        return other.value > this.value ? other : this;
+    }
+
 }

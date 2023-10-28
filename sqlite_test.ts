@@ -154,6 +154,39 @@ async function endToEnd(service: KvService) {
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(3n));
     }
 
+    {
+        const result = await kv.atomic().max([ 'u1' ], 4n).commit();
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+
+        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
+    }
+
+    {
+        const result = await kv.atomic().max([ 'u1' ], 3n).commit();
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+
+        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
+    }
+
+
+    {
+        const result = await kv.atomic().min([ 'u1' ], 2n).commit();
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+
+        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
+    }
+
+    {
+        const result = await kv.atomic().min([ 'u1' ], 4n).commit();
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+
+        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
+    }
+
     kv.close();
 
     // post-close assertions
