@@ -1,3 +1,4 @@
+import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_instance_of.ts';
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { encodeHex } from 'https://deno.land/std@0.204.0/encoding/hex.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
@@ -49,6 +50,17 @@ const packVersionstamp = (version: number) => `${version.toString().padStart(16,
 
 const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
 
+const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
+
+function querySingleValue<T>(key: KvKey, db: DB, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
+    const keyBytes = packKey(key);
+    const [ row ] = db.query<[ Uint8Array, string, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
+    if (!row) return undefined;
+    const [ bytes, encoding, versionstamp ] = row;
+    const value = readValue(bytes, encoding as KvValueEncoding, decodeV8) as T;
+    return { value, versionstamp };
+}
+
 //
 
 class SqliteKv implements Kv {
@@ -89,14 +101,10 @@ class SqliteKv implements Kv {
     async get<T = unknown>(key: KvKey, { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
         this.checkOpen('get');
         checkKeyNotEmpty(key);
-        const keyArr = packKey(key);
         await Promise.resolve();
         const { db, decodeV8 } = this;
-        const [ row ] = db.query<[ Uint8Array, string, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyArr ]);
-        if (!row) return { key, value: null, versionstamp: null };
-        const [ bytes, encoding, versionstamp ] = row;
-        const value = readValue(bytes, encoding as KvValueEncoding, decodeV8) as T;
-        return { key, value, versionstamp };
+        const result = querySingleValue<T>(key, db, decodeV8);
+        return result === undefined ? { key, value: null, versionstamp: null } : { key, value: result.value, versionstamp: result.versionstamp };
     }
 
     // deno-lint-ignore no-explicit-any
@@ -106,11 +114,11 @@ class SqliteKv implements Kv {
         await Promise.resolve();
         if (keys.length === 0) return [];
         const { db, decodeV8 } = this;
-        const keyArrs = keys.map(packKey);
-        const keyHexes = keyArrs.map(encodeHex);
-        const placeholders = new Array(keyArrs.length).fill('?').join(', ');
-        const rows = db.query<[ Uint8Array, Uint8Array, string, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyArrs);
-        const rowMap = new Map(rows.map(([ keyArr, bytes, encoding , versionstamp ]) => [ encodeHex(keyArr), ({ value: readValue(bytes, encoding as KvValueEncoding, decodeV8), versionstamp })]));
+        const keyBytesArr = keys.map(packKey);
+        const keyHexes = keyBytesArr.map(encodeHex);
+        const placeholders = new Array(keyBytesArr.length).fill('?').join(', ');
+        const rows = db.query<[ Uint8Array, Uint8Array, string, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyBytesArr);
+        const rowMap = new Map(rows.map(([ keyBytes, bytes, encoding , versionstamp ]) => [ encodeHex(keyBytes), ({ value: readValue(bytes, encoding as KvValueEncoding, decodeV8), versionstamp })]));
         return keys.map((key, i) => {
             const row = rowMap.get(keyHexes[i]);
             return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
@@ -154,21 +162,31 @@ class SqliteKv implements Kv {
     atomic(): AtomicOperation {
         return new GenericAtomicOperation((checks, mutations, enqueues) => {
             this.checkOpen('commit');
-            const notImplemented = () => new Error(`commit(${JSON.stringify({ checks, mutations, enqueues })}) not implemented`);
+            const notImplemented = () => new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
             if (checks.length === 0 && enqueues.length === 0) {
-                const { db, encodeV8 } = this;
+                const { db, encodeV8, decodeV8 } = this;
                 const newVersionstamp = packVersionstamp(++this.version);
                 db.transaction(() => {
                     for (const mutation of mutations) {
                         const { key } = mutation;
-                        const keyArr = packKey(key);
+                        const keyBytes = packKey(key);
                         if (mutation.type === 'set') {
                             const { value, expireIn } = mutation;
                             if (typeof expireIn === 'number') throw notImplemented();
                             const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes=excluded.bytes, encoding=excluded.encoding, versionstamp=excluded.versionstamp`, [ keyArr, bytes, encoding, newVersionstamp ]);
+                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                         } else if (mutation.type === 'delete') {
-                            db.query(`delete from kv where key = ?`, [ keyArr ]);
+                            db.query(`delete from kv where key = ?`, [ keyBytes ]);
+                        } else if (mutation.type === 'sum') {
+                            const existing = querySingleValue<_KvU64>(key, db, decodeV8);
+                            if (existing === undefined) {
+                                const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
+                                db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
+                            } else {
+                                assertInstanceOf(existing.value, _KvU64, `Can only 'sum' on KvU64`);
+                                const { data: bytes, encoding } = packKvValue(existing.value.sum(mutation.value), encodeV8);
+                                db.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
+                            }
                         } else {
                             throw notImplemented();
                         }

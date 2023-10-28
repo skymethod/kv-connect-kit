@@ -140,6 +140,20 @@ async function endToEnd(service: KvService) {
         assertEquals(result.versionstamp, null);
     }
 
+    {
+        const result = await kv.atomic().sum([ 'u1' ], 0n).commit();
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+
+        assertRejects(() => kv.atomic().sum([ 'a' ], 0n).commit());
+    }
+
+    {
+        await kv.atomic().sum([ 'u1' ], 1n).commit();
+        await kv.atomic().sum([ 'u1' ], 2n).commit();
+        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(3n));
+    }
+
     kv.close();
 
     // post-close assertions
