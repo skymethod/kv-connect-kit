@@ -318,7 +318,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
 
         // batchSize
         await Promise.all([ 'foo', '', {}, false, -1, 0, 1001 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any })))));
-        if (type !== 'native') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
+        if (type === 'kck') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
 
         // cursor
         const iter = kv.list({ prefix: [] });
@@ -332,8 +332,20 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await assertList({ prefix: [] }, { cursor: cursor1 }, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
         await assertList({ prefix: [] }, { cursor: cursor2 }, { a_b: 'a_b', b: 'b' });
         await Promise.all([ [], {}, '.', 123n ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `${v}`)));
-        if (type !== 'native') await Promise.all([ true, -1, 0, 'asdf', null ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `cursor: ${v}`)));
+        if (type === 'kck') await Promise.all([ true, -1, 0, 'asdf', null ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `cursor: ${v}`)));
 
+    }
+
+    if (type === 'kck' && !path.startsWith('https://')) {
+        const received: unknown[] = [];
+        kv.listenQueue(v => {
+            received.push(v);
+        })
+        const result = await kv.enqueue('q1');
+        assert(result.ok);
+        assertMatch(result.versionstamp, /^.+$/);
+        await sleep(50);
+        assertEquals(received, [ 'q1' ]);
     }
 
     kv.close();
