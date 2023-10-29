@@ -156,6 +156,7 @@ class SqliteKv implements Kv {
     list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
         this.checkOpen('list');
         if (!isRecord(selector)) throw new AssertionError(`Bad selector: ${JSON.stringify(selector)}`);
+        if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new AssertionError(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
         if (!isRecord(options)) throw new AssertionError(`Bad options: ${JSON.stringify(options)}`);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);

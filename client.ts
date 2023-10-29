@@ -160,6 +160,7 @@ class RemoteKv implements Kv {
     private readonly fetcher: Fetcher;
 
     private metadata: DatabaseMetadata;
+    private closed = false;
 
     private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, metadata: DatabaseMetadata) {
         this.url = url;
@@ -183,6 +184,7 @@ class RemoteKv implements Kv {
     }
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+        this.checkOpen('get');
         checkKeyNotEmpty(key);
         const { decodeV8 } = this;
         const packedKey = packKey(key);
@@ -200,26 +202,29 @@ class RemoteKv implements Kv {
 
     // deno-lint-ignore no-explicit-any
     async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
+        this.checkOpen('getMany');
         const { decodeV8 } = this;
         keys.forEach(checkKeyNotEmpty);
         const packedKeys = keys.map(packKey);
         const packedKeysHex = packedKeys.map(encodeHex);
-        const rt: KvEntryMaybe<T>[] = keys.map(v => ({ key: v, value: null, versionstamp: null }));
         const req: SnapshotRead = {
             ranges: packedKeys.map(computeReadRangeForKey)
         }
         const res = await this.snapshotRead(req, consistency);
+        const rowMap = new Map<string, { key: KvKey, value: unknown, versionstamp: string }>();
         for (const range of res.ranges) {
-            for (const item of range.values) {
-                const itemKeyHex = encodeHex(item.key);
-                const i = packedKeysHex.indexOf(itemKeyHex);
-                if (i >= 0) rt[i] = { key: keys[i], value: readValue(item.value, item.encoding, decodeV8) as T, versionstamp: encodeHex(item.versionstamp) };
+            for (const { key, value, encoding, versionstamp } of range.values) {
+                rowMap.set(encodeHex(key), { key: unpackKey(key), value: readValue(value, encoding, decodeV8) as T, versionstamp: encodeHex(versionstamp) })
             }
         }
-        return rt;
+        return keys.map((key, i) => {
+            const row = rowMap.get(packedKeysHex[i]);
+            return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
+        });
     }
 
     async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
+        this.checkOpen('set');
         checkExpireIn(expireIn);
         checkKeyNotEmpty(key);
         const { encodeV8 } = this;
@@ -241,6 +246,7 @@ class RemoteKv implements Kv {
     }
 
     async delete(key: KvKey): Promise<void> {
+        this.checkOpen('delete');
         const req: AtomicWrite = {
             enqueues: [],
             kvChecks: [],
@@ -258,13 +264,16 @@ class RemoteKv implements Kv {
     }
 
     list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
+        this.checkOpen('list');
         if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
+        if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new Error(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new GenericKvListIterator<T>(generator, () => outCursor[0]);
     }
 
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
+        this.checkOpen('enqueue');
         const { encodeV8 } = this;
         const req: AtomicWrite = {
             enqueues: [
@@ -285,6 +294,7 @@ class RemoteKv implements Kv {
     atomic(): AtomicOperation {
         let commitCalled = false;
         return new RemoteAtomicOperation(this.encodeV8, async req => {
+            this.checkOpen('commit');
             if (commitCalled) throw new Error(`'commit' already called for this atomic`);
             const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
             commitCalled = true;
@@ -295,10 +305,16 @@ class RemoteKv implements Kv {
     }
 
     close(): void {
+        this.checkOpen('close');
+        this.closed = true;
         // no persistent resources yet
     }
 
     //
+
+    private checkOpen(method: string) {
+        if (this.closed) throw new Error(`Cannot call '.${method}' after '.close' is called`);
+    }
 
     private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
         const { url, accessToken, debug, fetcher } = this;

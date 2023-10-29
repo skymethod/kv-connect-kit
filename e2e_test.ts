@@ -9,7 +9,7 @@ import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws
 import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
 import { chunk } from 'https://deno.land/std@0.204.0/collections/chunk.ts';
 import { checkString } from './check.ts';
-import { makeNativeService } from './client.ts';
+import { makeNativeService, makeRemoteService } from './client.ts';
 import { KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 
@@ -24,9 +24,9 @@ Deno.test({
 });
 
 Deno.test({
-    name: 'e2e-sqlite-memory',
+    name: 'e2e-kck-memory',
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug }), { type: 'sqlite', path: ':memory:' });
+        await endToEnd(makeSqliteService({ debug }), { type: 'kck', path: ':memory:' });
     }
 });
 
@@ -64,13 +64,26 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
                 await clear(service, path);
             }
         },
+    });
 
+    Deno.test({
+        name: 'e2e-kck-remote',
+        fn: async () => {
+            const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
+            const service = makeRemoteService({ accessToken: denoKvAccessToken, debug });
+            await clear(service, path);
+            try {
+                await endToEnd(service, { type: 'kck', path });
+            } finally {
+                await clear(service, path);
+            }
+        },
     });
 }
 
 //
 
-async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'sqlite', path: string }) {
+async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'kck', path: string }) {
 
     const kv = await service.openKv(path);
 
@@ -194,7 +207,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        assertRejects(() => kv.atomic().sum([ 'a' ], 0n).commit());
+        await assertRejects(() => kv.atomic().sum([ 'a' ], 0n).commit());
     }
 
     {
@@ -247,9 +260,9 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type !== 'native') { // native doesn't do timely-enough expiration
-            assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
-            assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
+        if (type === 'kck' && !path.startsWith('https://')) { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
+            await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
+            await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
             await kv.set([ 'ne1' ], 'ne1', { expireIn: undefined });
             await kv.set([ 'ne2' ], 'ne2');
@@ -277,21 +290,34 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await kv.set([ 'a' ], 'a');
         await assertList({ prefix: [] }, {}, { a: 'a' });
         await assertList({ prefix: [ 'a' ] }, {}, {});
+        await kv.set([ 'a', 'a' ], 'a_a');
+        await assertList({ prefix: [ 'a' ] }, {}, { a_a: 'a_a' });
+        await kv.set([ 'a', 'b' ], 'a_b');
+        await assertList({ prefix: [ 'a' ], start: [ 'a', '0' ] }, {}, { a_a: 'a_a', a_b: 'a_b' });
+        await assertRejects(() => assertList({ prefix: [ 'a' ], start: [ 'a', '0' ], end: [ 'a', '1' ] }, {}, {}));
+        await assertList({ prefix: [ 'a' ], start: [ 'a', 'a' ] }, {}, { a_a: 'a_a', a_b: 'a_b' });
+        await assertList({ prefix: [ 'a' ], start: [ 'a', 'b' ] }, {}, {  a_b: 'a_b' });
+        await assertList({ prefix: [ 'a' ], start: [ 'a', 'c' ] }, {}, {});
+        await assertList({ prefix: [ 'a' ], end: [ 'a', 'b' ] }, {}, { a_a: 'a_a' });
+        await assertList({ prefix: [ 'a' ], end: [ 'a', '1' ] }, {}, { });
+        await assertList({ prefix: [ 'b' ] }, { }, {});
+        await kv.set([ 'b' ], 'b');
+        await assertList({ start: [ 'a', 'a' ], end: [ 'c' ] }, {}, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
     }
 
     kv.close();
 
     // post-close assertions
     kv.atomic(); // does not throw!
-    assertRejects(async () => await logAndRethrow(() => kv.atomic().set([ 'a' ], 'a').commit()) );
+    await assertRejects(async () => await logAndRethrow(() => kv.atomic().set([ 'a' ], 'a').commit()) );
     assertThrows(() => kv.close()); // BadResource: Bad resource ID
-    assertRejects(async () => await logAndRethrow(() => kv.delete([ 'a' ])));
-    assertRejects(async () => await logAndRethrow(() => kv.enqueue('a')));
-    assertRejects(async () => await logAndRethrow(() => kv.get([ 'a' ])));
-    assertRejects(async () => await logAndRethrow(() => kv.getMany([ [ 'a' ] ])));
-    assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
-    if (type !== 'native') assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
-    assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
+    await assertRejects(async () => await logAndRethrow(() => kv.delete([ 'a' ])));
+    await assertRejects(async () => await logAndRethrow(() => kv.enqueue('a')));
+    await assertRejects(async () => await logAndRethrow(() => kv.get([ 'a' ])));
+    await assertRejects(async () => await logAndRethrow(() => kv.getMany([ [ 'a' ] ])));
+    await assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
+    if (type !== 'native') await assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
+    await assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
    
 }
 
