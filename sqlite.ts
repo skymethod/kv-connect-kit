@@ -2,7 +2,7 @@ import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
-import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
+import { DB, PreparedQuery, QueryParameterSet, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
@@ -58,25 +58,55 @@ const isValidVersionstamp = (versionstamp: string) => /^(\d{16})0000$/.test(vers
 
 const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
 
-function querySingleValue<T>(key: KvKey, db: DB, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
+
+function querySingleValue<T>(key: KvKey, statements: Statements, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
     const keyBytes = packKey(key);
-    const [ row ] = db.query<[ Uint8Array, KvValueEncoding, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
+    const [ row ] = statements.query<[ Uint8Array, KvValueEncoding, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
     if (!row) return undefined;
     const [ bytes, encoding, versionstamp ] = row;
     const value = readValue(bytes, encoding, decodeV8) as T;
     return { value, versionstamp };
 }
 
-function runExpirerTransaction(db: DB, debug: boolean): number | undefined {
+function runExpirerTransaction(db: DB, statements: Statements, debug: boolean): number | undefined {
     return db.transaction(() => {
-        db.query(`delete from kv where expires <= ?`, [ Date.now() ]);
+        statements.query(`delete from kv where expires <= ?`, [ Date.now() ]);
         if (debug) console.log(`runExpirerTransaction: expirer deleted ${db.changes}`);
-        const [ row ] = db.query<[ number ]>(`select min(expires) from kv`);
+        const [ row ] = statements.query<[ number ]>(`select min(expires) from kv`);
         return row?.at(0) ?? undefined;
     });
 }
 
 //
+
+class Statements {
+    private readonly db: DB;
+    private readonly debug: boolean;
+    private readonly cache: Record<string, PreparedQuery> = {};
+
+    constructor(db: DB, debug: boolean) {
+        this.db = db;
+        this.debug = debug;
+    }
+
+    query<Row extends unknown[]>(sql: string, params?: QueryParameterSet): Row[] {
+        const { db, debug, cache } = this;
+        let statement = cache[sql];
+        if (!statement) {
+            statement = db.prepareQuery<Row>(sql);
+            cache[sql] = statement;
+            if (debug) console.log(`statements: added new statement, size=${Object.keys(cache).length}`);
+        }
+        // deno-lint-ignore no-explicit-any
+        return (statement as any).all(params);
+    }
+
+    finalize() {
+        const { cache, debug } = this;
+        Object.values(cache).forEach(v => v.finalize());
+        if (debug) console.log(`statements: finalized ${Object.keys(cache).length}`);
+    }
+}
 
 class SqliteKv implements Kv {
 
@@ -85,6 +115,7 @@ class SqliteKv implements Kv {
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
     private readonly maxQueueAttempts: number;
+    private readonly statements: Statements;
 
     private closed = false;
     private version = 0;
@@ -97,6 +128,7 @@ class SqliteKv implements Kv {
     private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
         this.db = db;
         this.debug = debug;
+        this.statements = new Statements(db, debug);
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
         this.maxQueueAttempts = maxQueueAttempts;
@@ -105,7 +137,7 @@ class SqliteKv implements Kv {
             db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null, expires integer) without rowid`);
             db.execute(`create table if not exists queue(id integer primary key autoincrement, bytes blob not null, encoding text not null, failures integer not null, enqueued integer not null, available integer not null, locked integer)`);
             db.execute(`create table if not exists queue_keys_if_undelivered(id integer, key blob, primary key (id, key)) without rowid`);
-            this.minExpires = runExpirerTransaction(db, debug);
+            this.minExpires = runExpirerTransaction(db, this.statements, debug);
             db.execute(`update queue set locked = null where locked is not null`);
 
             const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
@@ -130,8 +162,8 @@ class SqliteKv implements Kv {
         this.checkOpen('get');
         checkKeyNotEmpty(key);
         await Promise.resolve();
-        const { db, decodeV8 } = this;
-        const result = querySingleValue<T>(key, db, decodeV8);
+        const { statements, decodeV8 } = this;
+        const result = querySingleValue<T>(key, statements, decodeV8);
         return result === undefined ? { key, value: null, versionstamp: null } : { key, value: result.value, versionstamp: result.versionstamp };
     }
 
@@ -141,11 +173,11 @@ class SqliteKv implements Kv {
         keys.forEach(checkKeyNotEmpty);
         await Promise.resolve();
         if (keys.length === 0) return [];
-        const { db, decodeV8 } = this;
+        const { statements, decodeV8 } = this;
         const keyBytesArr = keys.map(packKey);
         const keyHexes = keyBytesArr.map(encodeHex);
         const placeholders = new Array(keyBytesArr.length).fill('?').join(', ');
-        const rows = db.query<[ Uint8Array, Uint8Array, KvValueEncoding, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyBytesArr);
+        const rows = statements.query<[ Uint8Array, Uint8Array, KvValueEncoding, string ]>(`select key, bytes, encoding, versionstamp from kv where key in (${placeholders})`, keyBytesArr);
         const rowMap = new Map(rows.map(([ keyBytes, bytes, encoding , versionstamp ]) => [ encodeHex(keyBytes), ({ value: readValue(bytes, encoding, decodeV8), versionstamp })]));
         return keys.map((key, i) => {
             const row = rowMap.get(keyHexes[i]);
@@ -195,12 +227,12 @@ class SqliteKv implements Kv {
     atomic(additionalQueries?: () => void): AtomicOperation {
         return new GenericAtomicOperation(async (checks, mutations, enqueues) => {
             this.checkOpen('commit');
-            const { db, encodeV8, decodeV8 } = this;
+            const { db, statements, encodeV8, decodeV8 } = this;
             await Promise.resolve();
             return db.transaction(() => {
                 for (const { key, versionstamp } of checks) {
                     if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new AssertionError(`Bad 'versionstamp': ${versionstamp}`);
-                    const existing = querySingleValue(key, db, decodeV8);
+                    const existing = querySingleValue(key, statements, decodeV8);
                     if (versionstamp === null && existing) return { ok: false };
                     if (typeof versionstamp === 'string' && existing?.versionstamp !== versionstamp) return { ok: false };
                 }
@@ -212,11 +244,11 @@ class SqliteKv implements Kv {
                     const enqueued = Date.now();
                     const available = enqueued + delay;
                     const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                    const [ row ] = db.query<[ number ]>(`insert into queue(bytes, encoding, failures, enqueued, available) values (?, ?, ?, ?, ?) returning last_insert_rowid()`, [ bytes, encoding, 0, enqueued, available ]);
+                    const [ row ] = statements.query<[ number ]>(`insert into queue(bytes, encoding, failures, enqueued, available) values (?, ?, ?, ?, ?) returning last_insert_rowid()`, [ bytes, encoding, 0, enqueued, available ]);
                     const id = row[0];
                     const keyMap = Object.fromEntries(keysIfUndelivered.map(packKey).map(v => [ encodeHex(v), v ]));
                     for (const key of Object.values(keyMap)) {
-                        db.query(`insert into queue_keys_if_undelivered(id, key) values (?, ?)`, [ id, key ]);
+                        statements.query(`insert into queue_keys_if_undelivered(id, key) values (?, ?)`, [ id, key ]);
                     }
                     minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
                 }
@@ -228,29 +260,29 @@ class SqliteKv implements Kv {
                         const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : undefined;
                         if (expires !== undefined) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
                         const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                        db.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
+                        statements.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
                             [ keyBytes, bytes, encoding, newVersionstamp, expires ]);
                     } else if (mutation.type === 'delete') {
-                        db.query(`delete from kv where key = ?`, [ keyBytes ]);
+                        statements.query(`delete from kv where key = ?`, [ keyBytes ]);
                     } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
-                        const existing = querySingleValue<_KvU64>(key, db, decodeV8);
+                        const existing = querySingleValue<_KvU64>(key, statements, decodeV8);
                         if (existing === undefined) {
                             const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
-                            db.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
+                            statements.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                         } else {
                             assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
                             const result = mutation.type === 'min' ? existing.value.min(mutation.value)
                                 : mutation.type === 'max' ? existing.value.max(mutation.value)
                                 : existing.value.sum(mutation.value);
                             const { data: bytes, encoding } = packKvValue(result, encodeV8);
-                            db.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
+                            statements.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
                         }
                     } else {
                         throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
                     }
                 }
                 if (additionalQueries) additionalQueries();
-                db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
+                statements.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
                 if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
                 if (minEnqueued !== undefined) this.rescheduleWorker();
                 return { ok: true, versionstamp: newVersionstamp };
@@ -261,9 +293,10 @@ class SqliteKv implements Kv {
     close(): void {
         clearTimeout(this.expirerTimeout);
         clearTimeout(this.workerTimeout);
-        this.queueHandlerPromise?.resolve();
         this.checkOpen('close');
         this.closed = true;
+        this.queueHandlerPromise?.resolve();
+        this.statements.finalize();
         this.db.close();
     }
 
@@ -284,8 +317,8 @@ class SqliteKv implements Kv {
     }
 
     private runExpirer() {
-        const { db, debug } = this;
-        const newMinExpires = runExpirerTransaction(db, debug);
+        const { db, statements, debug } = this;
+        const newMinExpires = runExpirerTransaction(db, statements, debug);
         this.minExpires = newMinExpires;
         if (newMinExpires !== undefined) {
             this.rescheduleExpirer(newMinExpires);
@@ -300,15 +333,15 @@ class SqliteKv implements Kv {
     }
 
     private async runWorker() {
-        const { db, decodeV8, queueHandler, debug } = this;
+        const { db, statements, decodeV8, queueHandler, debug } = this;
         if (!queueHandler) {
             if (debug) console.log(`runWorker: no queueHandler`);
             return;
         }
         const time = Date.now();
-        const [ row ] = db.query<[ number, Uint8Array, KvValueEncoding, number ]>(`update queue set locked = ? where id = (select min(id) from queue where available <= ? and locked is null) returning id, bytes, encoding, failures`, [ time, time ]);
+        const [ row ] = statements.query<[ number, Uint8Array, KvValueEncoding, number ]>(`update queue set locked = ? where id = (select min(id) from queue where available <= ? and locked is null) returning id, bytes, encoding, failures`, [ time, time ]);
         if (!row) {
-            const nextAvailable = (db.query<[ number ]>(`select min(available) from queue where locked is null`)).at(0)?.at(0);
+            const nextAvailable = (statements.query<[ number ]>(`select min(available) from queue where locked is null`)).at(0)?.at(0);
             if (typeof nextAvailable === 'number') {
                 const nextAvailableIn = nextAvailable - Date.now();
                 if (debug) console.log(`runWorker: no work (nextAvailableIn=${nextAvailableIn}ms)`);
@@ -321,8 +354,8 @@ class SqliteKv implements Kv {
         const [ id, bytes, encoding, failures ] = row;
         const value = readValue(bytes, encoding, decodeV8);
         const deleteQueueRecords = () => {
-            db.query(`delete from queue_keys_if_undelivered where id = ?`, [ id ]);
-            db.query(`delete from queue where id = ?`, [ id ]);
+            statements.query(`delete from queue_keys_if_undelivered where id = ?`, [ id ]);
+            statements.query(`delete from queue where id = ?`, [ id ]);
         };
         try {
             if (debug) console.log(`runWorker: dispatching ${id}: ${value}`);
@@ -333,7 +366,7 @@ class SqliteKv implements Kv {
             const totalFailures = failures + 1;
             if (debug) console.log(`runWorker: ${id} failed (totalFailures=${totalFailures}): ${e.stack || e}`);
             if (totalFailures >= this.maxQueueAttempts) {
-                const rows = db.query<[ Uint8Array ]>(`select key from queue_keys_if_undelivered where id = ?`, [ id ]);
+                const rows = statements.query<[ Uint8Array ]>(`select key from queue_keys_if_undelivered where id = ?`, [ id ]);
                 const keys = rows.map(v => unpackKey(v[0]));
                 let atomic = this.atomic(deleteQueueRecords);
                 for (const key of keys) atomic = atomic.set(key, value);
@@ -341,14 +374,14 @@ class SqliteKv implements Kv {
                 if (debug) console.log(`runWorker: give up on ${id}, keys=${keys.length}`);
             } else {
                 const available = Date.now() + 1000 * totalFailures;
-                db.query(`update queue set locked = null, failures = ?, available = ? where id = ?`, [ totalFailures, available, id ]);
+                statements.query(`update queue set locked = null, failures = ?, available = ? where id = ?`, [ totalFailures, available, id ]);
             }
         }
         this.rescheduleWorker();
     }
 
     private async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
-        const { db, decodeV8 } = this;
+        const { statements, decodeV8 } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
         const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
@@ -357,7 +390,6 @@ class SqliteKv implements Kv {
         const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
         while (true) {
             pass++;
-            // console.log({ pass });
             let start: Uint8Array | undefined;
             let end: Uint8Array | undefined;
             if ('prefix' in selector) {
@@ -376,7 +408,7 @@ class SqliteKv implements Kv {
             if (start === undefined || end === undefined) throw new Error();
             const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
 
-            const rows = db.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
+            const rows = statements.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
 
             let entries = 0;
             for (const [ keyBytes, bytes, encoding, versionstamp ] of rows) {
