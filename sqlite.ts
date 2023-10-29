@@ -6,7 +6,7 @@ import { checkKeyNotEmpty, checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { CursorHolder, DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 export interface SqliteServiceOptions {
@@ -157,9 +157,9 @@ class SqliteKv implements Kv {
         this.checkOpen('list');
         checkListSelector(selector);
         options = checkListOptions(options);
-        const outCursor: [ string ] = [ '' ];
+        const outCursor = new CursorHolder();
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
-        return new GenericKvListIterator<T>(generator, () => outCursor[0]);
+        return new GenericKvListIterator<T>(generator, () => outCursor.get());
     }
 
     async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
@@ -260,7 +260,7 @@ class SqliteKv implements Kv {
         }
     }
 
-    private async * listStream<T>(outCursor: [ string ], selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    private async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { db, decodeV8 } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
@@ -297,7 +297,7 @@ class SqliteKv implements Kv {
                 const key = unpackKey(keyBytes);
                 const value = readValue(bytes, encoding, decodeV8) as T;
                 lastYieldedKeyBytes = keyBytes;
-                outCursor[0] = packCursor({ lastYieldedKeyBytes }); // cursor needs to be set before yield
+                outCursor.set(packCursor({ lastYieldedKeyBytes })); // cursor needs to be set before yield
                 yield { key, value, versionstamp };
                 yielded++;
                 // console.log({ yielded, entries, limit });

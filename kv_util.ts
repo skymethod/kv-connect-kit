@@ -76,6 +76,20 @@ export function checkListOptions(options: KvListOptions): KvListOptions {
     return { limit, cursor, reverse, consistency, batchSize };
 }
 
+export class CursorHolder {
+    private cursor: string | undefined;
+
+    get(): string {
+        const { cursor } = this;
+        if (cursor === undefined) throw new Error(`Cannot get cursor before first iteration`);
+        return cursor;
+    }
+
+    set(cursor: string) {
+        this.cursor = cursor;
+    }
+}
+
 export class GenericKvListIterator<T> implements KvListIterator<T> {
     private readonly generator: AsyncGenerator<KvEntry<T>>;
     private readonly _cursor: () => string;

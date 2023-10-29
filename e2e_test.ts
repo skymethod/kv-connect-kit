@@ -87,7 +87,6 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
 async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'kck', path: string }) {
 
     const kv = await service.openKv(path);
-
     {
         const items = await toArray(kv.list({ prefix: [] }));
         assertEquals(items.length, 0);
@@ -287,6 +286,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     }
 
     {
+        // list selectors
         await assertList({ prefix: [] }, {}, {});
         await kv.set([ 'a' ], 'a');
         await assertList({ prefix: [] }, {}, { a: 'a' });
@@ -305,15 +305,34 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await kv.set([ 'b' ], 'b');
         await assertList({ start: [ 'a', 'a' ], end: [ 'c' ] }, {}, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
 
+        // limit
         await Promise.all([0, -1, 0.6, '', {}].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { limit: v as any })))));
         await assertList({ prefix: [] }, { limit: 1 }, { a: 'a' });
+
+        // reverse
         await assertList({ prefix: [] }, { limit: 1, reverse: true }, { b: 'b' });
         await Promise.all([ 1, 'true', {}, [], 0 ].map(v => assertList({ prefix: [] }, { limit: 1, reverse: v as any }, { a: 'a' })));
 
+        // consistency
         await Promise.all([ 'foo', '', {}, false ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { consistency: v as any })))));
 
+        // batchSize
         await Promise.all([ 'foo', '', {}, false, -1, 0, 1001 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any })))));
         if (type !== 'native') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
+
+        // cursor
+        const iter = kv.list({ prefix: [] });
+        assertThrows(() => iter.cursor);
+        await iter.next();
+        const cursor1 = iter.cursor;
+        await iter.next();
+        const cursor2 = iter.cursor;
+        await toArray(iter);
+        
+        await assertList({ prefix: [] }, { cursor: cursor1 }, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
+        await assertList({ prefix: [] }, { cursor: cursor2 }, { a_b: 'a_b', b: 'b' });
+        await Promise.all([ [], {}, '.', 123n ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `${v}`)));
+        if (type !== 'native') await Promise.all([ true, -1, 0, 'asdf', null ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `cursor: ${v}`)));
 
     }
 
@@ -330,7 +349,6 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     await assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
     if (type !== 'native') await assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
     await assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
-   
 }
 
 function sleep(ms: number) {
