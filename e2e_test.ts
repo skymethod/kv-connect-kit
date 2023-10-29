@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
 import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
 import { assertExists } from 'https://deno.land/std@0.204.0/assert/assert_exists.ts';
@@ -294,7 +295,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await assertList({ prefix: [ 'a' ] }, {}, { a_a: 'a_a' });
         await kv.set([ 'a', 'b' ], 'a_b');
         await assertList({ prefix: [ 'a' ], start: [ 'a', '0' ] }, {}, { a_a: 'a_a', a_b: 'a_b' });
-        await assertRejects(() => assertList({ prefix: [ 'a' ], start: [ 'a', '0' ], end: [ 'a', '1' ] }, {}, {}));
+        await assertRejects(async () => await toArray(kv.list({ prefix: [ 'a' ], start: [ 'a', '0' ], end: [ 'a', '1' ] }, {})));
         await assertList({ prefix: [ 'a' ], start: [ 'a', 'a' ] }, {}, { a_a: 'a_a', a_b: 'a_b' });
         await assertList({ prefix: [ 'a' ], start: [ 'a', 'b' ] }, {}, {  a_b: 'a_b' });
         await assertList({ prefix: [ 'a' ], start: [ 'a', 'c' ] }, {}, {});
@@ -304,8 +305,15 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await kv.set([ 'b' ], 'b');
         await assertList({ start: [ 'a', 'a' ], end: [ 'c' ] }, {}, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
 
-        // deno-lint-ignore no-explicit-any
-        await Promise.all([0, -1, 0.6, '', {}].map(v => assertRejects(() => assertList({ prefix: [] }, { limit: v as any }, {}))));
+        await Promise.all([0, -1, 0.6, '', {}].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { limit: v as any })))));
+        await assertList({ prefix: [] }, { limit: 1 }, { a: 'a' });
+        await assertList({ prefix: [] }, { limit: 1, reverse: true }, { b: 'b' });
+        await Promise.all([ 1, 'true', {}, [], 0 ].map(v => assertList({ prefix: [] }, { limit: 1, reverse: v as any }, { a: 'a' })));
+
+        await Promise.all([ 'foo', '', {}, false ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { consistency: v as any })))));
+
+        await Promise.all([ 'foo', '', {}, false, -1, 0, 1001 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any })))));
+        if (type !== 'native') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
 
     }
 

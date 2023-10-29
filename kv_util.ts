@@ -65,10 +65,15 @@ export function checkListSelector(selector: KvListSelector) {
     if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new TypeError(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
 }
 
-export function checkListOptions(options: KvListOptions) {
+export function checkListOptions(options: KvListOptions): KvListOptions {
     if (!isRecord(options)) throw new TypeError(`Bad options: ${JSON.stringify(options)}`);
-    const { limit } = options;
+    const { limit, cursor, consistency, batchSize } = options;
     if (!(limit === undefined || typeof limit === 'number' && limit > 0 && Number.isSafeInteger(limit))) throw new TypeError(`Bad 'limit': ${limit}`);
+    if (!(cursor === undefined || typeof cursor === 'string')) throw new TypeError(`Bad 'cursor': ${limit}`);
+    const reverse = options.reverse === true; // follow native logic
+    if (!(consistency === undefined || consistency === 'strong' || consistency === 'eventual')) throw new TypeError(`Bad 'consistency': ${consistency}`);
+    if (!(batchSize === undefined || typeof batchSize === 'number' && batchSize > 0 && Number.isSafeInteger(batchSize) && batchSize <= 1000)) throw new TypeError(`Bad 'batchSize': ${batchSize}`);
+    return { limit, cursor, reverse, consistency, batchSize };
 }
 
 export class GenericKvListIterator<T> implements KvListIterator<T> {

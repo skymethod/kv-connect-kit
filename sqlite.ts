@@ -156,7 +156,7 @@ class SqliteKv implements Kv {
     list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
         this.checkOpen('list');
         checkListSelector(selector);
-        checkListOptions(options);
+        options = checkListOptions(options);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new GenericKvListIterator<T>(generator, () => outCursor[0]);
