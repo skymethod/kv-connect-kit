@@ -1,10 +1,10 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
-import { checkExpireIn, checkKeyNotEmpty, isRecord } from './check.ts';
+import { checkExpireIn, checkKeyNotEmpty } from './check.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, GenericKvListIterator, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericKvListIterator, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
 import { AtomicWrite, AtomicWriteOutput, Enqueue, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
@@ -263,10 +263,10 @@ class RemoteKv implements Kv {
         if (status !== 'AW_SUCCESS') throw new Error(`set failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
     }
 
-    list<T = unknown>(selector: KvListSelector, options?: KvListOptions): KvListIterator<T> {
+    list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
         this.checkOpen('list');
-        if (!isRecord(selector)) throw new Error(`Bad selector: ${JSON.stringify(selector)}`);
-        if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new Error(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
+        checkListSelector(selector);
+        checkListOptions(options);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new GenericKvListIterator<T>(generator, () => outCursor[0]);

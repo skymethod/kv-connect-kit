@@ -2,11 +2,11 @@ import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
-import { checkKeyNotEmpty, checkMatches, isRecord } from './check.ts';
+import { checkKeyNotEmpty, checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 export interface SqliteServiceOptions {
@@ -155,9 +155,8 @@ class SqliteKv implements Kv {
 
     list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
         this.checkOpen('list');
-        if (!isRecord(selector)) throw new AssertionError(`Bad selector: ${JSON.stringify(selector)}`);
-        if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new AssertionError(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
-        if (!isRecord(options)) throw new AssertionError(`Bad options: ${JSON.stringify(options)}`);
+        checkListSelector(selector);
+        checkListOptions(options);
         const outCursor: [ string ] = [ '' ];
         const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
         return new GenericKvListIterator<T>(generator, () => outCursor[0]);

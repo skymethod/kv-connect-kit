@@ -1,6 +1,6 @@
 import { decodeHex, encodeHex } from './bytes.ts';
-import { checkKeyNotEmpty, checkExpireIn } from './check.ts';
-import { AtomicCheck, AtomicOperation, KvCommitError, KvCommitResult, KvEntry, KvKey, KvListIterator, KvMutation } from './kv_types.ts';
+import { checkKeyNotEmpty, checkExpireIn, isRecord } from './check.ts';
+import { AtomicCheck, AtomicOperation, KvCommitError, KvCommitResult, KvEntry, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
 
@@ -58,6 +58,17 @@ export function unpackCursor(str: string): Cursor {
         // noop
     }
     throw new Error(`Invalid cursor`);
+}
+
+export function checkListSelector(selector: KvListSelector) {
+    if (!isRecord(selector)) throw new TypeError(`Bad selector: ${JSON.stringify(selector)}`);
+    if ('prefix' in selector && 'start' in selector && 'end' in selector) throw new TypeError(`Selector can not specify both 'start' and 'end' key when specifying 'prefix'`);
+}
+
+export function checkListOptions(options: KvListOptions) {
+    if (!isRecord(options)) throw new TypeError(`Bad options: ${JSON.stringify(options)}`);
+    const { limit } = options;
+    if (!(limit === undefined || typeof limit === 'number' && limit > 0 && Number.isSafeInteger(limit))) throw new TypeError(`Bad 'limit': ${limit}`);
 }
 
 export class GenericKvListIterator<T> implements KvListIterator<T> {

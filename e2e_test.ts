@@ -303,6 +303,10 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         await assertList({ prefix: [ 'b' ] }, { }, {});
         await kv.set([ 'b' ], 'b');
         await assertList({ start: [ 'a', 'a' ], end: [ 'c' ] }, {}, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
+
+        // deno-lint-ignore no-explicit-any
+        await Promise.all([0, -1, 0.6, '', {}].map(v => assertRejects(() => assertList({ prefix: [] }, { limit: v as any }, {}))));
+
     }
 
     kv.close();
