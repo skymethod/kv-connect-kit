@@ -31,6 +31,30 @@ Deno.test({
     }
 });
 
+Deno.test({
+    name: 'e2e-native-disk',
+    fn: async () => {
+        const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
+        try {
+            await endToEnd(makeNativeService(), { type: 'native', path });
+        } finally {
+            await Deno.remove(path);
+        }
+    }
+});
+
+Deno.test({
+    name: 'e2e-kck-disk',
+    fn: async () => {
+        const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
+        try {
+            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path });
+        } finally {
+            await Deno.remove(path);
+        }
+    }
+});
+
 //
 
 const denoKvAccessToken = (await Deno.permissions.query({ name: 'env', variable: 'DENO_KV_ACCESS_TOKEN' })).state === 'granted' && Deno.env.get('DENO_KV_ACCESS_TOKEN');
@@ -85,6 +109,8 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
 //
 
 async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'kck', path: string }) {
+
+    const pathType = path === ':memory:' ? 'memory' : path.startsWith('https://') ? 'remote' : 'disk';
 
     const kv = await service.openKv(path);
 
@@ -269,7 +295,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type === 'kck' && !path.startsWith('https://')) { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
+        if (type === 'kck' && pathType !== 'remote') { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
@@ -347,7 +373,8 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     }
 
     // enqueue/listenQueue
-    if (type === 'kck' && !path.startsWith('https://')) {
+    if (type === 'kck' && pathType !== 'remote') {
+        const delay = pathType === 'disk' ? 200 : 20;
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
             records[v as string].received = Date.now();
@@ -363,7 +390,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
 
         {
             records['q2'] = { sent: Date.now() };
-            const result = await kv.enqueue('q2', { delay: 20 });
+            const result = await kv.enqueue('q2', { delay });
             assert(result.ok);
             assertMatch(result.versionstamp, /^.+$/);
         }
@@ -375,11 +402,11 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
             assertMatch(result.versionstamp, /^.+$/);
         }
 
-        await sleep(50);
+        await sleep(delay * 5 / 2);
         assertEquals(Object.entries(records).toSorted((a, b) => a[1].received! - b[1].received!).map(v => v[0]), [ 'q1', 'q3', 'q2' ]);
-        assert((records.q1.received! - records.q1.sent) <= 10);
-        assert((records.q2.received! - records.q2.sent) >= 20);
-        assert((records.q3.received! - records.q3.sent) <= 10);
+        assert((records.q1.received! - records.q1.sent) <= delay / 2);
+        assert((records.q2.received! - records.q2.sent) >= delay);
+        assert((records.q3.received! - records.q3.sent) <= delay / 2);
         assertEquals((await kv.get([ 'q3' ])).value, 'q3');
     }
 
@@ -426,6 +453,40 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     await assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
     if (type !== 'native') await assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
     await assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
+
+    // disk-only tests
+    if (pathType === 'disk') {
+        const k1 = [ 'k1' ];
+
+        let versionstamp1: string;
+        {
+            const kv = await service.openKv(path);
+            const result = await kv.set(k1, 'v1');
+            versionstamp1 = result.versionstamp;
+            kv.close();
+        }
+        {
+            const kv = await service.openKv(path);
+            const { value, versionstamp } = await kv.get(k1);
+            assertEquals(value, 'v1');
+            assertEquals(versionstamp, versionstamp1);
+            const { versionstamp: versionstamp2 } = await kv.set(k1, 'v2');
+            assert(versionstamp2 > versionstamp1, `${versionstamp2} > ${versionstamp1}`);
+
+            await kv.enqueue('later');
+
+            kv.close();
+        }
+        {
+            const kv = await service.openKv(path);
+            const received: unknown[] = [];
+            kv.listenQueue(v => { received.push(v); });
+            await sleep(50);
+            assertEquals(received, [ 'later' ]);
+
+            kv.close();
+        }
+    }
 }
 
 function sleep(ms: number) {

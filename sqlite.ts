@@ -79,35 +79,6 @@ function runExpirerTransaction(db: DB, statements: Statements, debug: boolean): 
 
 //
 
-class Statements {
-    private readonly db: DB;
-    private readonly debug: boolean;
-    private readonly cache: Record<string, PreparedQuery> = {};
-
-    constructor(db: DB, debug: boolean) {
-        this.db = db;
-        this.debug = debug;
-    }
-
-    query<Row extends unknown[]>(sql: string, params?: QueryParameterSet): Row[] {
-        const { db, debug, cache } = this;
-        let statement = cache[sql];
-        if (!statement) {
-            statement = db.prepareQuery<Row>(sql);
-            cache[sql] = statement;
-            if (debug) console.log(`statements: added new statement, size=${Object.keys(cache).length}`);
-        }
-        // deno-lint-ignore no-explicit-any
-        return (statement as any).all(params);
-    }
-
-    finalize() {
-        const { cache, debug } = this;
-        Object.values(cache).forEach(v => v.finalize());
-        if (debug) console.log(`statements: finalized ${Object.keys(cache).length}`);
-    }
-}
-
 class SqliteKv implements Kv {
 
     private readonly db: DB;
@@ -282,7 +253,7 @@ class SqliteKv implements Kv {
                     }
                 }
                 if (additionalQueries) additionalQueries();
-                statements.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
+                statements.query(`insert into prop(name, value) values ('versionstamp', ?) on conflict(name) do update set value = excluded.value`, [ newVersionstamp ]);
                 if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
                 if (minEnqueued !== undefined) this.rescheduleWorker();
                 return { ok: true, versionstamp: newVersionstamp };
@@ -426,4 +397,33 @@ class SqliteKv implements Kv {
         }
     }
 
+}
+
+class Statements {
+    private readonly db: DB;
+    private readonly debug: boolean;
+    private readonly cache: Record<string, PreparedQuery> = {};
+
+    constructor(db: DB, debug: boolean) {
+        this.db = db;
+        this.debug = debug;
+    }
+
+    query<Row extends unknown[]>(sql: string, params?: QueryParameterSet): Row[] {
+        const { db, debug, cache } = this;
+        let statement = cache[sql];
+        if (!statement) {
+            statement = db.prepareQuery<Row>(sql);
+            cache[sql] = statement;
+            if (debug) console.log(`statements: added new statement, size=${Object.keys(cache).length}`);
+        }
+        // deno-lint-ignore no-explicit-any
+        return (statement as any).all(params);
+    }
+
+    finalize() {
+        const { cache, debug } = this;
+        Object.values(cache).forEach(v => v.finalize());
+        if (debug) console.log(`statements: finalized ${Object.keys(cache).length}`);
+    }
 }
