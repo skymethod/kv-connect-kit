@@ -87,6 +87,8 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
 async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'kck', path: string }) {
 
     const kv = await service.openKv(path);
+
+    // basic get/set, trivial list, noop commit
     {
         const items = await toArray(kv.list({ prefix: [] }));
         assertEquals(items.length, 0);
@@ -135,6 +137,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertMatch(result.versionstamp, /^.+$/);
     }
 
+    // getMany
     {
         const result = await kv.getMany([]);
         assertEquals(result.length, 0);
@@ -186,6 +189,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertMatch(second.versionstamp, /^.+$/);
     }
 
+    // delete
     {
         await kv.delete([ 'b' ]);
         const result = await kv.get([ 'b' ]);
@@ -202,6 +206,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertEquals(result.versionstamp, null);
     }
 
+    // sum
     {
         const result = await kv.atomic().sum([ 'u1' ], 0n).commit();
         assert(result.ok);
@@ -216,6 +221,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(3n));
     }
 
+    // max
     {
         const result = await kv.atomic().max([ 'u1' ], 4n).commit();
         assert(result.ok);
@@ -232,6 +238,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
     }
 
+    // min
     {
         const result = await kv.atomic().min([ 'u1' ], 2n).commit();
         assert(result.ok);
@@ -248,6 +255,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
     }
 
+    // atomic check
     {
         const { versionstamp: existingVersionstamp } = await kv.get([ 'a' ]);
         assertExists(existingVersionstamp);
@@ -256,6 +264,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assert((await kv.atomic().check({ key: [ 'a' ], versionstamp: existingVersionstamp }).commit()).ok);
     }
 
+    // set expireIn
     {
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
@@ -276,16 +285,17 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         }
     }
 
+    // clear all data
     await kv.atomic().delete([ 'a' ]).delete([ 'u1' ]).delete([ 'ne1' ]).delete([ 'ne2' ]).commit();
 
-    const assertList = async (selector: KvListSelector, options: KvListOptions, expected: Record<string, unknown>) => {
-        const items = await toArray(kv.list(selector, options));
-        const itemArr = items.map(v => [ v.key, v.value ]);
-        const expectedArr = Object.entries(expected).map(v => [ v[0].split('_'), v[1] ]);
-        assertEquals(itemArr, expectedArr);
-    }
-
     {
+        const assertList = async (selector: KvListSelector, options: KvListOptions, expected: Record<string, unknown>) => {
+            const items = await toArray(kv.list(selector, options));
+            const itemArr = items.map(v => [ v.key, v.value ]);
+            const expectedArr = Object.entries(expected).map(v => [ v[0].split('_'), v[1] ]);
+            assertEquals(itemArr, expectedArr);
+        }
+
         // list selectors
         await assertList({ prefix: [] }, {}, {});
         await kv.set([ 'a' ], 'a');
@@ -336,6 +346,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
 
     }
 
+    // enqueue/listenQueue
     if (type === 'kck' && !path.startsWith('https://')) {
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
@@ -372,6 +383,36 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
         assertEquals((await kv.get([ 'q3' ])).value, 'q3');
     }
 
+    // multiple mutations on the same key
+    {
+        const k1 = [ 'k1' ];
+        await kv.atomic().set(k1, 'a').set(k1, 'b').commit();
+        assertEquals((await kv.get(k1)).value, 'b');
+        await kv.atomic().set(k1, 'a').delete(k1).commit();
+        assertEquals((await kv.get(k1)).value, null);
+        await kv.atomic().delete(k1).set(k1, 'a').commit();
+        assertEquals((await kv.get(k1)).value, 'a');
+
+        await kv.atomic().set(k1, service.newKvU64(1n)).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(1n));
+
+        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(3n));
+
+        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).sum(k1, 3n).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(6n));
+
+        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).set(k1, service.newKvU64(5n)).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(5n));
+
+        await kv.atomic().max(k1, 100n).max(k1, 50n).max(k1, 150n).max(k1, 75n).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(150n));
+
+        await kv.atomic().min(k1, 100n).min(k1, 50n).min(k1, 150n).min(k1, 75n).commit();
+        assertEquals((await kv.get(k1)).value, service.newKvU64(50n));
+    }
+
+    // close
     kv.close();
 
     // post-close assertions
