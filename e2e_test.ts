@@ -27,7 +27,7 @@ Deno.test({
 Deno.test({
     name: 'e2e-kck-memory',
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug }), { type: 'kck', path: ':memory:' });
+        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path: ':memory:' });
     }
 });
 
@@ -269,7 +269,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
             assertEquals((await kv.get([ 'e' ])).value, 'e');
             assertEquals((await kv.get([ 'ne1' ])).value, 'ne1');
             assertEquals((await kv.get([ 'ne2' ])).value, 'ne2');
-            await sleep(200);
+            await sleep(150);
             assertEquals((await kv.get([ 'e' ])).value, null);
             assertEquals((await kv.get([ 'ne1' ])).value, 'ne1');
             assertEquals((await kv.get([ 'ne2' ])).value, 'ne2');
@@ -337,15 +337,39 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     }
 
     if (type === 'kck' && !path.startsWith('https://')) {
-        const received: unknown[] = [];
+        const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
-            received.push(v);
-        })
-        const result = await kv.enqueue('q1');
-        assert(result.ok);
-        assertMatch(result.versionstamp, /^.+$/);
+            records[v as string].received = Date.now();
+            if (v === 'q3') throw new Error();
+        });
+
+        {
+            records['q1'] = { sent: Date.now() };
+            const result = await kv.enqueue('q1');
+            assert(result.ok);
+            assertMatch(result.versionstamp, /^.+$/);
+        }
+
+        {
+            records['q2'] = { sent: Date.now() };
+            const result = await kv.enqueue('q2', { delay: 20 });
+            assert(result.ok);
+            assertMatch(result.versionstamp, /^.+$/);
+        }
+
+        {
+            records['q3'] = { sent: Date.now() };
+            const result = await kv.enqueue('q3', { keysIfUndelivered: [ [ 'q3' ] ] });
+            assert(result.ok);
+            assertMatch(result.versionstamp, /^.+$/);
+        }
+
         await sleep(50);
-        assertEquals(received, [ 'q1' ]);
+        assertEquals(Object.entries(records).toSorted((a, b) => a[1].received! - b[1].received!).map(v => v[0]), [ 'q1', 'q3', 'q2' ]);
+        assert((records.q1.received! - records.q1.sent) <= 10);
+        assert((records.q2.received! - records.q2.sent) >= 20);
+        assert((records.q3.received! - records.q3.sent) <= 10);
+        assertEquals((await kv.get([ 'q3' ])).value, 'q3');
     }
 
     kv.close();

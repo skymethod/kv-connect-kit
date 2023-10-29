@@ -1,7 +1,6 @@
 import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_instance_of.ts';
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
-import { chunk } from 'https://deno.land/std@0.204.0/collections/chunk.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
 import { DB, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches } from './check.ts';
@@ -33,6 +32,9 @@ export interface SqliteServiceOptions {
 
     /** Custom options to use when initializing the sqlite db */
     readonly sqliteOptions?: SqliteOptions;
+
+    /** Maximum number of attempts to deliver a failing queue message before giving up. Defaults to 10. */
+    readonly maxQueueAttempts?: number;
 }
 
 /**
@@ -82,6 +84,7 @@ class SqliteKv implements Kv {
     private readonly debug: boolean;
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
+    private readonly maxQueueAttempts: number;
 
     private closed = false;
     private version = 0;
@@ -91,11 +94,12 @@ class SqliteKv implements Kv {
     private queueHandler?: (value: unknown) => void | Promise<void>;
     private queueHandlerPromise?: Deferred<void>;
 
-    private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8) {
+    private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
         this.db = db;
         this.debug = debug;
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
+        this.maxQueueAttempts = maxQueueAttempts;
         db.transaction(() => {
             db.execute(`create table if not exists prop(name text primary key, value text not null) without rowid`);
             db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null, expires integer) without rowid`);
@@ -112,13 +116,14 @@ class SqliteKv implements Kv {
     }
 
     static of(url: string | undefined, opts: SqliteServiceOptions = {}): Kv {
-        const { sqliteOptions, wrapUnknownValues, debug = false } = opts;
+        const { sqliteOptions, wrapUnknownValues, debug = false, maxQueueAttempts = 10 } = opts;
+        if (!(typeof maxQueueAttempts === 'number' && Number.isSafeInteger(maxQueueAttempts) && maxQueueAttempts > 0)) throw new Error(`'maxQueueAttempts' must be a positive integer`);
         const db = new DB(url, sqliteOptions);
 
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
         const decodeV8: DecodeV8 = opts.decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues }));
 
-        return new SqliteKv(db, debug, encodeV8, decodeV8 );
+        return new SqliteKv(db, debug, encodeV8, decodeV8, maxQueueAttempts );
     }
 
     async get<T = unknown>(key: KvKey, { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
@@ -187,7 +192,7 @@ class SqliteKv implements Kv {
         return rt;
     }
 
-    atomic(): AtomicOperation {
+    atomic(additionalQueries?: () => void): AtomicOperation {
         return new GenericAtomicOperation(async (checks, mutations, enqueues) => {
             this.checkOpen('commit');
             const { db, encodeV8, decodeV8 } = this;
@@ -244,6 +249,7 @@ class SqliteKv implements Kv {
                         throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
                     }
                 }
+                if (additionalQueries) additionalQueries();
                 db.query(`update prop set value = ? where name = 'version'`, [ newVersionstamp ]);
                 if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
                 if (minEnqueued !== undefined) this.rescheduleWorker();
@@ -288,9 +294,9 @@ class SqliteKv implements Kv {
         }
     }
 
-    private rescheduleWorker() {
+    private rescheduleWorker(delay = 0) {
         clearTimeout(this.workerTimeout);
-        if (this.queueHandler) this.workerTimeout = setTimeout(() => this.runWorker(), 0);
+        if (this.queueHandler) this.workerTimeout = setTimeout(() => this.runWorker(), delay);
     }
 
     private async runWorker() {
@@ -302,35 +308,37 @@ class SqliteKv implements Kv {
         const time = Date.now();
         const [ row ] = db.query<[ number, Uint8Array, KvValueEncoding, number ]>(`update queue set locked = ? where id = (select min(id) from queue where available <= ? and locked is null) returning id, bytes, encoding, failures`, [ time, time ]);
         if (!row) {
-            if (debug) console.log(`runWorker: no work`);
+            const nextAvailable = (db.query<[ number ]>(`select min(available) from queue where locked is null`)).at(0)?.at(0);
+            if (typeof nextAvailable === 'number') {
+                const nextAvailableIn = nextAvailable - Date.now();
+                if (debug) console.log(`runWorker: no work (nextAvailableIn=${nextAvailableIn}ms)`);
+                this.rescheduleWorker(nextAvailableIn);
+            } else {
+                if (debug) console.log('runWorker: no work');
+            }
             return;
         }
         const [ id, bytes, encoding, failures ] = row;
-        const clear = () => {
-            if (debug) console.log(`runWorker: clearing ${id}`);
-            db.transaction(() => {
-                db.query(`delete from queue_keys_if_undelivered where id = ?`, [ id ]);
-                db.query(`delete from queue where id = ?`, [ id ]);
-            });
-        }
         const value = readValue(bytes, encoding, decodeV8);
+        const deleteQueueRecords = () => {
+            db.query(`delete from queue_keys_if_undelivered where id = ?`, [ id ]);
+            db.query(`delete from queue where id = ?`, [ id ]);
+        };
         try {
-            if (debug) console.log(`runWorker: dispatching ${value}`);
+            if (debug) console.log(`runWorker: dispatching ${id}: ${value}`);
             await Promise.resolve(queueHandler(value));
-            clear();
+            if (debug) console.log(`runWorker: ${id} succeeded, clearing`);
+            db.transaction(deleteQueueRecords);
         } catch (e) {
-            if (debug) console.log(`runWorker: handler error: ${e.stack || e}`);
-            const maxFailures = 10;
             const totalFailures = failures + 1;
-            if (totalFailures >= maxFailures) {
+            if (debug) console.log(`runWorker: ${id} failed (totalFailures=${totalFailures}): ${e.stack || e}`);
+            if (totalFailures >= this.maxQueueAttempts) {
                 const rows = db.query<[ Uint8Array ]>(`select key from queue_keys_if_undelivered where id = ?`, [ id ]);
                 const keys = rows.map(v => unpackKey(v[0]));
-                for (const batch of chunk(keys, 1000)) {
-                    let atomic = this.atomic();
-                    for (const key of batch) atomic = atomic.set(key, value);
-                    await atomic.commit();
-                }
-                clear(); // TODO, include in same tx
+                let atomic = this.atomic(deleteQueueRecords);
+                for (const key of keys) atomic = atomic.set(key, value);
+                await atomic.commit();
+                if (debug) console.log(`runWorker: give up on ${id}, keys=${keys.length}`);
             } else {
                 const available = Date.now() + 1000 * totalFailures;
                 db.query(`update queue set locked = null, failures = ?, available = ? where id = ?`, [ totalFailures, available, id ]);
