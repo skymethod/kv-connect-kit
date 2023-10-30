@@ -2,13 +2,14 @@ import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
-import { DB, PreparedQuery, QueryParameterSet, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { checkKeyNotEmpty, checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { CursorHolder, DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
+import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
+import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
 
 export interface SqliteServiceOptions {
 
@@ -30,8 +31,8 @@ export interface SqliteServiceOptions {
      * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
     readonly decodeV8?: DecodeV8;
 
-    /** Custom options to use when initializing the sqlite db */
-    readonly sqliteOptions?: SqliteOptions;
+    /** Sqlite implementation to use. Defaults to cross-platform wasm implementation. */
+    readonly driver?: SqliteDriver;
 
     /** Maximum number of attempts to deliver a failing queue message before giving up. Defaults to 10. */
     readonly maxQueueAttempts?: number;
@@ -42,7 +43,7 @@ export interface SqliteServiceOptions {
  */
 export function makeSqliteService(opts?: SqliteServiceOptions): KvService {
     return {
-        openKv: (url) => Promise.resolve(SqliteKv.of(url, opts)),
+        openKv: (url) => Promise.resolve(SqliteKv.of(url ?? ':memory:', opts)),
         newKvU64: value => new _KvU64(value),
         isKvU64: (obj: unknown): obj is KvU64 => obj instanceof _KvU64,
     }
@@ -69,7 +70,7 @@ function querySingleValue<T>(key: KvKey, statements: Statements, decodeV8: Decod
     return { value, versionstamp };
 }
 
-function runExpirerTransaction(db: DB, statements: Statements, debug: boolean): number | undefined {
+function runExpirerTransaction(db: SqliteDb, statements: Statements, debug: boolean): number | undefined {
     return db.transaction(() => {
         statements.query(`delete from kv where expires <= ?`, [ Date.now() ]);
         if (debug) console.log(`runExpirerTransaction: expirer deleted ${db.changes}`);
@@ -90,7 +91,7 @@ function tryParseInt(str: string): number | undefined {
 
 class SqliteKv implements Kv {
 
-    private readonly db: DB;
+    private readonly db: SqliteDb;
     private readonly debug: boolean;
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
@@ -105,7 +106,7 @@ class SqliteKv implements Kv {
     private queueHandler?: (value: unknown) => void | Promise<void>;
     private queueHandlerPromise?: Deferred<void>;
 
-    private constructor(db: DB, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
+    private constructor(db: SqliteDb, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
         this.db = db;
         this.debug = debug;
         this.statements = new Statements(db, debug);
@@ -153,10 +154,10 @@ class SqliteKv implements Kv {
         if (this.minExpires !== undefined) this.rescheduleExpirer(this.minExpires);
     }
 
-    static of(url: string | undefined, opts: SqliteServiceOptions = {}): Kv {
-        const { sqliteOptions, wrapUnknownValues, debug = false, maxQueueAttempts = 10 } = opts;
+    static of(path: string, opts: SqliteServiceOptions = {}): Kv {
+        const { driver = new SqliteWasmDriver(), wrapUnknownValues, debug = false, maxQueueAttempts = 10 } = opts;
         if (!(typeof maxQueueAttempts === 'number' && Number.isSafeInteger(maxQueueAttempts) && maxQueueAttempts > 0)) throw new Error(`'maxQueueAttempts' must be a positive integer`);
-        const db = new DB(url, sqliteOptions);
+        const db = driver.newDb(path);
 
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
         const decodeV8: DecodeV8 = opts.decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues }));
@@ -435,25 +436,24 @@ class SqliteKv implements Kv {
 }
 
 class Statements {
-    private readonly db: DB;
+    private readonly db: SqliteDb;
     private readonly debug: boolean;
-    private readonly cache: Record<string, PreparedQuery> = {};
+    private readonly cache: Record<string, SqlitePreparedStatement<unknown[]>> = {};
 
-    constructor(db: DB, debug: boolean) {
+    constructor(db: SqliteDb, debug: boolean) {
         this.db = db;
         this.debug = debug;
     }
 
-    query<Row extends unknown[]>(sql: string, params?: QueryParameterSet): Row[] {
+    query<Row extends unknown[]>(sql: string, params?: SqliteQueryParam[]): Row[] {
         const { db, debug, cache } = this;
         let statement = cache[sql];
         if (!statement) {
-            statement = db.prepareQuery<Row>(sql);
+            statement = db.prepareStatement<Row>(sql);
             cache[sql] = statement;
             if (debug) console.log(`statements: added new statement, size=${Object.keys(cache).length}`);
         }
-        // deno-lint-ignore no-explicit-any
-        return (statement as any).all(params);
+        return statement.query(params) as Row[];
     }
 
     finalize() {
