@@ -50,6 +50,8 @@ export function makeSqliteService(opts?: SqliteServiceOptions): KvService {
 
 //
 
+const SCHEMA = 1;
+
 const packVersionstamp = (version: number) => `${version.toString().padStart(16, '0')}0000`;
 
 const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
@@ -57,7 +59,6 @@ const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('vers
 const isValidVersionstamp = (versionstamp: string) => /^(\d{16})0000$/.test(versionstamp);
 
 const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
-
 
 function querySingleValue<T>(key: KvKey, statements: Statements, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
     const keyBytes = packKey(key);
@@ -75,6 +76,14 @@ function runExpirerTransaction(db: DB, statements: Statements, debug: boolean): 
         const [ row ] = statements.query<[ number ]>(`select min(expires) from kv`);
         return row?.at(0) ?? undefined;
     });
+}
+
+function tryParseInt(str: string): number | undefined {
+    try {
+        return parseInt(str);
+    } catch {
+        return undefined;
+    }
 }
 
 //
@@ -103,19 +112,45 @@ class SqliteKv implements Kv {
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
         this.maxQueueAttempts = maxQueueAttempts;
+
+        // initialize database
         db.transaction(() => {
+            // create prop table, initialize schema and run migrations (in the future)
             db.execute(`create table if not exists prop(name text primary key, value text not null) without rowid`);
+            {
+                const existingSchema = db.query<[ string ]>(`select value from prop where name = 'schema'`).at(0)?.at(0);
+                if (existingSchema === undefined) {
+                    if (debug) console.log(`SqliteKV(): no existing schema, initializing to ${SCHEMA}`);
+                    db.query(`insert into prop(name, value) values ('schema', ?)`, [ SCHEMA ]);
+                } else {
+                    const existingSchemaInt = tryParseInt(existingSchema);
+                    if (!(typeof existingSchemaInt === 'number' && Number.isSafeInteger(existingSchemaInt) && existingSchemaInt > 0)) throw new Error(`Bad existing schema: ${existingSchema}`);
+                    if (existingSchemaInt > 1) throw new Error(`Unknown existing schema: ${existingSchemaInt}`);
+                    if (debug) console.log(`SqliteKV(): existing schema ${existingSchemaInt}`);
+                }
+            }
+
+            // create the rest of the tables
             db.execute(`create table if not exists kv(key blob primary key, bytes blob not null, encoding text not null, versionstamp text not null, expires integer) without rowid`);
             db.execute(`create table if not exists queue(id integer primary key autoincrement, bytes blob not null, encoding text not null, failures integer not null, enqueued integer not null, available integer not null, locked integer)`);
             db.execute(`create table if not exists queue_keys_if_undelivered(id integer, key blob, primary key (id, key)) without rowid`);
+
+            // expire old keys
             this.minExpires = runExpirerTransaction(db, this.statements, debug);
+
+            // unlock any locked queue items
             db.execute(`update queue set locked = null where locked is not null`);
 
-            const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
-            if (row) this.version = unpackVersionstamp(row[0]);
+            // load initial versionstamp
+            {
+                const [ row ] = db.query<[ string ]>(`select value from prop where name = 'versionstamp'`);
+                if (row) this.version = unpackVersionstamp(row[0]);
+                if (debug) console.log(`SqliteKV(): version=${this.version}`);
+            }
         });
+
+        // reschedule expirer if we have any expiring keys
         if (this.minExpires !== undefined) this.rescheduleExpirer(this.minExpires);
-        if (debug) console.log(`new SqliteKV: version=${this.version}`);
     }
 
     static of(url: string | undefined, opts: SqliteServiceOptions = {}): Kv {
