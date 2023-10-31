@@ -2,14 +2,14 @@ import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
-import { checkKeyNotEmpty, checkMatches } from './check.ts';
+import { checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicOperation, Kv, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvService, KvU64 } from './kv_types.ts';
+import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { CursorHolder, DecodeV8, EncodeV8, GenericAtomicOperation, GenericKvListIterator, KvValueEncoding, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
-import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, KvValueEncoding, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
+import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 export interface SqliteServiceOptions {
 
@@ -89,16 +89,12 @@ function tryParseInt(str: string): number | undefined {
 
 //
 
-class SqliteKv implements Kv {
+class SqliteKv extends BaseKv {
 
     private readonly db: SqliteDb;
-    private readonly debug: boolean;
-    private readonly encodeV8: EncodeV8;
-    private readonly decodeV8: DecodeV8;
     private readonly maxQueueAttempts: number;
     private readonly statements: Statements;
 
-    private closed = false;
     private version = 0;
     private minExpires: number | undefined;
     private expirerTimeout = 0;
@@ -107,11 +103,9 @@ class SqliteKv implements Kv {
     private queueHandlerPromise?: Deferred<void>;
 
     private constructor(db: SqliteDb, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
+        super({ debug, encodeV8, decodeV8 });
         this.db = db;
-        this.debug = debug;
         this.statements = new Statements(db, debug);
-        this.encodeV8 = encodeV8;
-        this.decodeV8 = decodeV8;
         this.maxQueueAttempts = maxQueueAttempts;
 
         // initialize database
@@ -165,21 +159,15 @@ class SqliteKv implements Kv {
         return new SqliteKv(db, debug, encodeV8, decodeV8, maxQueueAttempts );
     }
 
-    async get<T = unknown>(key: KvKey, { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
-        this.checkOpen('get');
-        checkKeyNotEmpty(key);
+    protected async get_<T = unknown>(key: KvKey, _consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<T>> {
         await Promise.resolve();
         const { statements, decodeV8 } = this;
         const result = querySingleValue<T>(key, statements, decodeV8);
         return result === undefined ? { key, value: null, versionstamp: null } : { key, value: result.value, versionstamp: result.versionstamp };
     }
 
-    // deno-lint-ignore no-explicit-any
-    async getMany<T>(keys: readonly KvKey[], { consistency: _ }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
-        this.checkOpen('getMany');
-        keys.forEach(checkKeyNotEmpty);
+    protected async getMany_(keys: readonly KvKey[], _consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<unknown>[]> {
         await Promise.resolve();
-        if (keys.length === 0) return [];
         const { statements, decodeV8 } = this;
         const keyBytesArr = keys.map(packKey);
         const keyHexes = keyBytesArr.map(encodeHex);
@@ -188,41 +176,11 @@ class SqliteKv implements Kv {
         const rowMap = new Map(rows.map(([ keyBytes, bytes, encoding , versionstamp ]) => [ encodeHex(keyBytes), ({ value: readValue(bytes, encoding, decodeV8), versionstamp })]));
         return keys.map((key, i) => {
             const row = rowMap.get(keyHexes[i]);
-            return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
+            return row ? { key, value: row.value, versionstamp: row.versionstamp } : { key, value: null, versionstamp: null };
         });
     }
 
-    async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
-        this.checkOpen('set');
-        const result = await this.atomic().set(key, value, { expireIn }).commit();
-        if (!result.ok) throw new AssertionError(`set failed`); // should never happen, there are no checks
-        return result;
-    }
-
-    async delete(key: KvKey): Promise<void> {
-        this.checkOpen('delete');
-        const result = await this.atomic().delete(key).commit();
-        if (!result.ok) throw new AssertionError(`delete failed`); // should never happen, there are no checks
-    }
-
-    list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
-        this.checkOpen('list');
-        checkListSelector(selector);
-        options = checkListOptions(options);
-        const outCursor = new CursorHolder();
-        const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
-        return new GenericKvListIterator<T>(generator, () => outCursor.get());
-    }
-
-    async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
-        this.checkOpen('enqueue');
-        const result = await this.atomic().enqueue(value, opts).commit();
-        if (!result.ok) throw new AssertionError(`enqueue failed`); // should never happen, there are no checks
-        return result;
-    }
-
-    listenQueue(handler: (value: unknown) => void | Promise<void>): Promise<void> {
-        this.checkOpen('listenQueue');
+    protected listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
         if (this.queueHandler) throw new Error(`Already called 'listenQueue'`); // for now
         this.queueHandler = handler;
         const rt = deferred<void>();
@@ -231,87 +189,124 @@ class SqliteKv implements Kv {
         return rt;
     }
 
-    atomic(additionalQueries?: () => void): AtomicOperation {
-        return new GenericAtomicOperation(async (checks, mutations, enqueues) => {
-            this.checkOpen('commit');
-            const { db, statements, encodeV8, decodeV8 } = this;
-            await Promise.resolve();
-            return db.transaction(() => {
-                for (const { key, versionstamp } of checks) {
-                    if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new AssertionError(`Bad 'versionstamp': ${versionstamp}`);
-                    const existing = querySingleValue(key, statements, decodeV8);
-                    if (versionstamp === null && existing) return { ok: false };
-                    if (typeof versionstamp === 'string' && existing?.versionstamp !== versionstamp) return { ok: false };
+    protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: () => void): Promise<KvCommitResult | KvCommitError> {
+        const { db, statements, encodeV8, decodeV8 } = this;
+        await Promise.resolve();
+        return db.transaction(() => {
+            for (const { key, versionstamp } of checks) {
+                if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new AssertionError(`Bad 'versionstamp': ${versionstamp}`);
+                const existing = querySingleValue(key, statements, decodeV8);
+                if (versionstamp === null && existing) return { ok: false };
+                if (typeof versionstamp === 'string' && existing?.versionstamp !== versionstamp) return { ok: false };
+            }
+            let minExpires: number | undefined;
+            let minEnqueued: number | undefined;
+            const newVersionstamp = packVersionstamp(++this.version);
+            for (const { value, opts = {} } of enqueues) {
+                const { delay = 0, keysIfUndelivered = [] } = opts;
+                const enqueued = Date.now();
+                const available = enqueued + delay;
+                const { data: bytes, encoding } = packKvValue(value, encodeV8);
+                const [ row ] = statements.query<[ number ]>(`insert into queue(bytes, encoding, failures, enqueued, available) values (?, ?, ?, ?, ?) returning last_insert_rowid()`, [ bytes, encoding, 0, enqueued, available ]);
+                const id = row[0];
+                const keyMap = Object.fromEntries(keysIfUndelivered.map(packKey).map(v => [ encodeHex(v), v ]));
+                for (const key of Object.values(keyMap)) {
+                    statements.query(`insert into queue_keys_if_undelivered(id, key) values (?, ?)`, [ id, key ]);
                 }
-                let minExpires: number | undefined;
-                let minEnqueued: number | undefined;
-                const newVersionstamp = packVersionstamp(++this.version);
-                for (const { value, opts = {} } of enqueues) {
-                    const { delay = 0, keysIfUndelivered = [] } = opts;
-                    const enqueued = Date.now();
-                    const available = enqueued + delay;
+                minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
+            }
+            for (const mutation of mutations) {
+                const { key } = mutation;
+                const keyBytes = packKey(key);
+                if (mutation.type === 'set') {
+                    const { value, expireIn } = mutation;
+                    const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : null;
+                    if (expires !== null) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
                     const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                    const [ row ] = statements.query<[ number ]>(`insert into queue(bytes, encoding, failures, enqueued, available) values (?, ?, ?, ?, ?) returning last_insert_rowid()`, [ bytes, encoding, 0, enqueued, available ]);
-                    const id = row[0];
-                    const keyMap = Object.fromEntries(keysIfUndelivered.map(packKey).map(v => [ encodeHex(v), v ]));
-                    for (const key of Object.values(keyMap)) {
-                        statements.query(`insert into queue_keys_if_undelivered(id, key) values (?, ?)`, [ id, key ]);
-                    }
-                    minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
-                }
-                for (const mutation of mutations) {
-                    const { key } = mutation;
-                    const keyBytes = packKey(key);
-                    if (mutation.type === 'set') {
-                        const { value, expireIn } = mutation;
-                        const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : null;
-                        if (expires !== null) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
-                        const { data: bytes, encoding } = packKvValue(value, encodeV8);
-                        statements.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
-                            [ keyBytes, bytes, encoding, newVersionstamp, expires ]);
-                    } else if (mutation.type === 'delete') {
-                        statements.query(`delete from kv where key = ?`, [ keyBytes ]);
-                    } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
-                        const existing = querySingleValue<_KvU64>(key, statements, decodeV8);
-                        if (existing === undefined) {
-                            const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
-                            statements.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
-                        } else {
-                            assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
-                            const result = mutation.type === 'min' ? existing.value.min(mutation.value)
-                                : mutation.type === 'max' ? existing.value.max(mutation.value)
-                                : existing.value.sum(mutation.value);
-                            const { data: bytes, encoding } = packKvValue(result, encodeV8);
-                            statements.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
-                        }
+                    statements.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
+                        [ keyBytes, bytes, encoding, newVersionstamp, expires ]);
+                } else if (mutation.type === 'delete') {
+                    statements.query(`delete from kv where key = ?`, [ keyBytes ]);
+                } else if (mutation.type === 'sum' || mutation.type === 'min' || mutation.type === 'max') {
+                    const existing = querySingleValue<_KvU64>(key, statements, decodeV8);
+                    if (existing === undefined) {
+                        const { data: bytes, encoding } = packKvValue(mutation.value, encodeV8);
+                        statements.query(`insert into kv(key, bytes, encoding, versionstamp) values (?, ?, ?, ?)`, [ keyBytes, bytes, encoding, newVersionstamp ]);
                     } else {
-                        throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
+                        assertInstanceOf(existing.value, _KvU64, `Can only '${mutation.type}' on KvU64`);
+                        const result = mutation.type === 'min' ? existing.value.min(mutation.value)
+                            : mutation.type === 'max' ? existing.value.max(mutation.value)
+                            : existing.value.sum(mutation.value);
+                        const { data: bytes, encoding } = packKvValue(result, encodeV8);
+                        statements.query(`update kv set bytes = ?, encoding = ?, versionstamp = ? where key = ?`, [ bytes, encoding, newVersionstamp, keyBytes ]);
                     }
+                } else {
+                    throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
                 }
-                if (additionalQueries) additionalQueries();
-                statements.query(`insert into prop(name, value) values ('versionstamp', ?) on conflict(name) do update set value = excluded.value`, [ newVersionstamp ]);
-                if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
-                if (minEnqueued !== undefined) this.rescheduleWorker();
-                return { ok: true, versionstamp: newVersionstamp };
-            });
+            }
+            if (additionalWork) additionalWork();
+            statements.query(`insert into prop(name, value) values ('versionstamp', ?) on conflict(name) do update set value = excluded.value`, [ newVersionstamp ]);
+            if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
+            if (minEnqueued !== undefined) this.rescheduleWorker();
+            return { ok: true, versionstamp: newVersionstamp };
         });
     }
 
-    close(): void {
+    protected close_(): void {
         clearTimeout(this.expirerTimeout);
         clearTimeout(this.workerTimeout);
-        this.checkOpen('close');
-        this.closed = true;
         this.queueHandlerPromise?.resolve();
         this.statements.finalize();
         this.db.close();
     }
 
-    //
+    protected async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+        const { statements, decodeV8 } = this;
+        let yielded = 0;
+        if (typeof limit === 'number' && yielded >= limit) return;
+        const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
+        let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
+        let pass = 0;
+        const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
+        while (true) {
+            pass++;
+            let start: Uint8Array | undefined;
+            let end: Uint8Array | undefined;
+            if ('prefix' in selector) {
+                start = 'start' in selector ? packKey(selector.start) : prefixBytes;
+                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefixBytes!, 0xff ]);
+            } else {
+                start = packKey(selector.start);
+                end = packKey(selector.end);
+            }
+            if (reverse) {
+                end = lastYieldedKeyBytes ?? end;
+            } else {
+                start = lastYieldedKeyBytes ?? start;
+            }
+           
+            if (start === undefined || end === undefined) throw new Error();
+            if (start.length === 0) start = new Uint8Array([ 0 ]);
+            const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
 
-    private checkOpen(method: string) {
-        if (this.closed) throw new AssertionError(`Cannot call '.${method}' after '.close' is called`);
+            const rows = statements.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
+            let entries = 0;
+            for (const [ keyBytes, bytes, encoding, versionstamp ] of rows) {
+                if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, keyBytes) || prefixBytes && equalBytes(prefixBytes, keyBytes))) continue;
+                const key = unpackKey(keyBytes);
+                const value = readValue(bytes, encoding, decodeV8) as T;
+                lastYieldedKeyBytes = keyBytes;
+                outCursor.set(packCursor({ lastYieldedKeyBytes })); // cursor needs to be set before yield
+                yield { key, value, versionstamp };
+                yielded++;
+                // console.log({ yielded, entries, limit });
+                if (typeof limit === 'number' && yielded >= limit) return;
+            }
+            if (entries < batchLimit) return;
+        }
     }
+
+    //
 
     private rescheduleExpirer(expires: number) {
         const { minExpires, debug, expirerTimeout } = this;
@@ -385,52 +380,6 @@ class SqliteKv implements Kv {
             }
         }
         this.rescheduleWorker();
-    }
-
-    private async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency: _, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
-        const { statements, decodeV8 } = this;
-        let yielded = 0;
-        if (typeof limit === 'number' && yielded >= limit) return;
-        const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
-        let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
-        let pass = 0;
-        const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
-        while (true) {
-            pass++;
-            let start: Uint8Array | undefined;
-            let end: Uint8Array | undefined;
-            if ('prefix' in selector) {
-                start = 'start' in selector ? packKey(selector.start) : prefixBytes;
-                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefixBytes!, 0xff ]);
-            } else {
-                start = packKey(selector.start);
-                end = packKey(selector.end);
-            }
-            if (reverse) {
-                end = lastYieldedKeyBytes ?? end;
-            } else {
-                start = lastYieldedKeyBytes ?? start;
-            }
-           
-            if (start === undefined || end === undefined) throw new Error();
-            if (start.length === 0) start = new Uint8Array([ 0 ]);
-            const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
-
-            const rows = statements.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
-            let entries = 0;
-            for (const [ keyBytes, bytes, encoding, versionstamp ] of rows) {
-                if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, keyBytes) || prefixBytes && equalBytes(prefixBytes, keyBytes))) continue;
-                const key = unpackKey(keyBytes);
-                const value = readValue(bytes, encoding, decodeV8) as T;
-                lastYieldedKeyBytes = keyBytes;
-                outCursor.set(packCursor({ lastYieldedKeyBytes })); // cursor needs to be set before yield
-                yield { key, value, versionstamp };
-                yielded++;
-                // console.log({ yielded, entries, limit });
-                if (typeof limit === 'number' && yielded >= limit) return;
-            }
-            if (entries < batchLimit) return;
-        }
     }
 
 }

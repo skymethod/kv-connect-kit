@@ -1,6 +1,6 @@
 import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn, isRecord } from './check.ts';
-import { AtomicCheck, AtomicOperation, KvCommitError, KvCommitResult, KvEntry, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
+import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
 
@@ -123,7 +123,7 @@ export class GenericKvListIterator<T> implements KvListIterator<T> {
 
 }
 
-type Enqueue = { value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] } };
+export type Enqueue = { value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] } };
 type CommitFn = (checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[]) => Promise<KvCommitResult | KvCommitError>;
 
 export class GenericAtomicOperation implements AtomicOperation {
@@ -183,6 +183,96 @@ export class GenericAtomicOperation implements AtomicOperation {
 
     async commit(): Promise<KvCommitResult | KvCommitError> {
         return await this.commitFn(this.checks, this.mutations, this.enqueues);
+    }
+
+}
+
+export abstract class BaseKv implements Kv {
+
+    protected readonly debug: boolean;
+    protected readonly encodeV8: EncodeV8;
+    protected readonly decodeV8: DecodeV8;
+
+    private closed = false;
+
+    protected constructor({ debug, encodeV8, decodeV8 }: { debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8 }) {
+        this.debug = debug;
+        this.encodeV8 = encodeV8;
+        this.decodeV8 = decodeV8;
+    }
+
+    async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
+        this.checkOpen('get');
+        checkKeyNotEmpty(key);
+        return await this.get_(key, consistency);
+    }
+
+    // deno-lint-ignore no-explicit-any
+    async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
+        this.checkOpen('getMany');
+        keys.forEach(checkKeyNotEmpty);
+        if (keys.length === 0) return [];
+        return await this.getMany_(keys, consistency);
+    }
+
+    async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
+        this.checkOpen('set');
+        const result = await this.atomic().set(key, value, { expireIn }).commit();
+        if (!result.ok) throw new Error(`set failed`); // should never happen, there are no checks
+        return result;
+    }
+
+    async delete(key: KvKey): Promise<void> {
+        this.checkOpen('delete');
+        const result = await this.atomic().delete(key).commit();
+        if (!result.ok) throw new Error(`delete failed`); // should never happen, there are no checks
+    }
+
+    async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
+        this.checkOpen('enqueue');
+        const result = await this.atomic().enqueue(value, opts).commit();
+        if (!result.ok) throw new Error(`enqueue failed`); // should never happen, there are no checks
+        return result;
+    }
+
+    list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
+        this.checkOpen('list');
+        checkListSelector(selector);
+        options = checkListOptions(options);
+        const outCursor = new CursorHolder();
+        const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
+        return new GenericKvListIterator<T>(generator, () => outCursor.get());
+    }
+
+    async listenQueue(handler: (value: unknown) => void | Promise<void>): Promise<void> {
+        this.checkOpen('listenQueue');
+        return await this.listenQueue_(handler);
+    }
+
+    atomic(additionalWork?: () => void): AtomicOperation {
+        return new GenericAtomicOperation(async (checks, mutations, enqueues) => {
+            this.checkOpen('commit');
+            return await this.commit(checks, mutations, enqueues, additionalWork);
+        });
+    }
+
+    close(): void {
+        this.checkOpen('close');
+        this.closed = true;
+        this.close_();
+    }
+
+    protected abstract get_<T = unknown>(key: KvKey, consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<T>>;
+    protected abstract getMany_(keys: readonly KvKey[], consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<unknown>[]>;
+    protected abstract listStream<T>(outCursor: CursorHolder, selector: KvListSelector, opts: KvListOptions): AsyncGenerator<KvEntry<T>>;
+    protected abstract listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void>;
+    protected abstract commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: () => void): Promise<KvCommitResult | KvCommitError>;
+    protected abstract close_(): void;
+
+    //
+
+    private checkOpen(method: string) {
+        if (this.closed) throw new Error(`Cannot call '.${method}' after '.close' is called`);
     }
 
 }
