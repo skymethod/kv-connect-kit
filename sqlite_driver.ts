@@ -21,7 +21,7 @@ export interface SqlitePreparedStatement<R extends Row> {
 export type Row = unknown[];
 
 export type SqliteQueryParam =
-  | undefined
-  | number
-  | string
-  | Uint8Array;
+    | null
+    | number
+    | string
+    | Uint8Array;

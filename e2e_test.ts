@@ -13,30 +13,42 @@ import { checkString } from './check.ts';
 import { makeNativeService, makeRemoteService } from './client.ts';
 import { KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
+import { SqliteNativeDriver } from './sqlite_native_driver.ts';
 
 const flags = parseFlags(Deno.args);
 const debug = !!flags.debug;
 
 Deno.test({
-    name: 'e2e-native-memory',
+    name: 'e2e-deno-memory',
+    only: false,
     fn: async () => {
-        await endToEnd(makeNativeService(), { type: 'native', path: ':memory:' });
+        await endToEnd(makeNativeService(), { type: 'deno', path: ':memory:' });
     }
 });
 
 Deno.test({
-    name: 'e2e-kck-memory',
+    name: 'e2e-kck-wasm-memory',
+    only: false,
     fn: async () => {
         await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path: ':memory:' });
     }
 });
 
 Deno.test({
-    name: 'e2e-native-disk',
+    name: 'e2e-kck-native-memory',
+    only: false,
+    fn: async () => {
+        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', path: ':memory:' });
+    }
+});
+
+Deno.test({
+    name: 'e2e-deno-disk',
+    only: false,
     fn: async () => {
         const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
         try {
-            await endToEnd(makeNativeService(), { type: 'native', path });
+            await endToEnd(makeNativeService(), { type: 'deno', path });
         } finally {
             await Deno.remove(path);
         }
@@ -44,11 +56,25 @@ Deno.test({
 });
 
 Deno.test({
-    name: 'e2e-kck-disk',
+    name: 'e2e-kck-wasm-disk',
+    only: false,
     fn: async () => {
         const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
         try {
             await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path });
+        } finally {
+            await Deno.remove(path);
+        }
+    }
+});
+
+Deno.test({
+    name: 'e2e-kck-native-disk',
+    only: false,
+    fn: async () => {
+        const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
+        try {
+            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', path });
         } finally {
             await Deno.remove(path);
         }
@@ -78,13 +104,13 @@ async function clear(service: KvService, path: string) {
 
 if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
     Deno.test({
-        name: 'e2e-native-remote',
+        name: 'e2e-deno-remote',
         fn: async () => {
             const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
             const service = makeNativeService();
             await clear(service, path);
             try {
-                await endToEnd(service, { type: 'native', path });
+                await endToEnd(service, { type: 'deno', path });
             } finally {
                 await clear(service, path);
             }
@@ -108,7 +134,7 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
 
 //
 
-async function endToEnd(service: KvService, { type, path }: { type: 'native' | 'kck', path: string }) {
+async function endToEnd(service: KvService, { type, path }: { type: 'deno' | 'kck', path: string }) {
 
     const pathType = path === ':memory:' ? 'memory' : path.startsWith('https://') ? 'remote' : 'disk';
 
@@ -451,7 +477,7 @@ async function endToEnd(service: KvService, { type, path }: { type: 'native' | '
     await assertRejects(async () => await logAndRethrow(() => kv.get([ 'a' ])));
     await assertRejects(async () => await logAndRethrow(() => kv.getMany([ [ 'a' ] ])));
     await assertRejects(async () => await logAndRethrow(() => kv.set([ 'a' ], 'a')));
-    if (type !== 'native') await assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
+    if (type !== 'deno') await assertRejects(async () => await logAndRethrow(() => kv.listenQueue(() => {}))); // doesn't throw, but probably should: https://github.com/denoland/deno/issues/20991
     await assertRejects(async () => await logAndRethrow(() => toArray(kv.list({ prefix: [] }))));
 
     // disk-only tests

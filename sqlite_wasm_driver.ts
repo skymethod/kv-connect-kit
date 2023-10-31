@@ -1,11 +1,16 @@
-import { DB, PreparedQuery } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
+import { DB, PreparedQuery, SqliteOptions } from 'https://deno.land/x/sqlite@v3.8/mod.ts';
 import { Row, SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 
 /** Cross-platform wasm implementation based on x/sqlite. */
 export class SqliteWasmDriver implements SqliteDriver {
+    private readonly options?: SqliteOptions;
+
+    constructor(options?: SqliteOptions) {
+        this.options = options;
+    }
 
     newDb(path: string): SqliteDb {
-        return new SqliteWasmDb(new DB(path)); // TODO options?
+        return new SqliteWasmDb(new DB(path, this.options));
     }
     
 }

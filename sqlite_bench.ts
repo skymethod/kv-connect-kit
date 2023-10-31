@@ -1,8 +1,9 @@
 import { makeNativeService } from './client.ts';
 import { KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
+import { SqliteNativeDriver } from './sqlite_native_driver.ts';
 
-Deno.bench('kck-sqlite-disk', { group: 'sqlite-disk', baseline: true, only: false }, async b => {
+Deno.bench('kck-wasm-sqlite-disk', { group: 'sqlite-disk', baseline: false, only: false }, async b => {
     const path = await Deno.makeTempFile({ prefix: 'kck-bench-', suffix: '.db' });
     try {
         b.start();
@@ -13,7 +14,18 @@ Deno.bench('kck-sqlite-disk', { group: 'sqlite-disk', baseline: true, only: fals
     }
 });
 
-Deno.bench('native-sqlite-disk', { group: 'sqlite-disk', baseline: false, only: false }, async b => {
+Deno.bench('kck-native-sqlite-disk', { group: 'sqlite-disk', baseline: false, only: false }, async b => {
+    const path = await Deno.makeTempFile({ prefix: 'kck-bench-', suffix: '.db' });
+    try {
+        b.start();
+        await runBenchmarks(makeSqliteService({ debug: false, driver: new SqliteNativeDriver() }), path, 10);
+        b.end();
+    } finally {
+        await Deno.remove(path);
+    }
+});
+
+Deno.bench('deno-sqlite-disk', { group: 'sqlite-disk', baseline: true, only: false }, async b => {
     const path = await Deno.makeTempFile({ prefix: 'kck-bench-', suffix: '.db' });
     try {
         b.start();
@@ -24,11 +36,16 @@ Deno.bench('native-sqlite-disk', { group: 'sqlite-disk', baseline: false, only: 
     }
 });
 
-Deno.bench('kck-sqlite-memory', { group: 'sqlite-memory', baseline: true, only: false }, async () => {
+Deno.bench('kck-wasm-sqlite-memory', { group: 'sqlite-memory', baseline: false, only: false }, async () => {
+    await runBenchmarks(makeSqliteService({ debug: false, driver: new SqliteNativeDriver() }), ':memory:', 5000);
+});
+
+Deno.bench('kck-native-sqlite-memory', { group: 'sqlite-memory', baseline: false, only: false }, async () => {
     await runBenchmarks(makeSqliteService({ debug: false }), ':memory:', 5000);
 });
 
-Deno.bench('native-sqlite-memory', { group: 'sqlite-memory', baseline: false, only: false }, async () => {
+
+Deno.bench('deno-sqlite-memory', { group: 'sqlite-memory', baseline: true, only: false }, async () => {
     await runBenchmarks(makeNativeService(), ':memory:', 5000);
 });
 

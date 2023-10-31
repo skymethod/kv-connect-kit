@@ -264,8 +264,8 @@ class SqliteKv implements Kv {
                     const keyBytes = packKey(key);
                     if (mutation.type === 'set') {
                         const { value, expireIn } = mutation;
-                        const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : undefined;
-                        if (expires !== undefined) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
+                        const expires = typeof expireIn === 'number' ? Date.now() + Math.round(expireIn) : null;
+                        if (expires !== null) minExpires = Math.min(expires, minExpires ?? Number.MAX_SAFE_INTEGER);
                         const { data: bytes, encoding } = packKvValue(value, encodeV8);
                         statements.query(`insert into kv(key, bytes, encoding, versionstamp, expires) values (?, ?, ?, ?, ?) on conflict(key) do update set bytes = excluded.bytes, encoding = excluded.encoding, versionstamp = excluded.versionstamp, expires = excluded.expires`,
                             [ keyBytes, bytes, encoding, newVersionstamp, expires ]);
@@ -413,10 +413,10 @@ class SqliteKv implements Kv {
             }
            
             if (start === undefined || end === undefined) throw new Error();
+            if (start.length === 0) start = new Uint8Array([ 0 ]);
             const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
 
             const rows = statements.query<[ Uint8Array, Uint8Array, KvValueEncoding, string, ]>(`select key, bytes, encoding, versionstamp from kv where key >= ? and key < ? order by key ${reverse ? 'desc' : 'asc'} limit ?`, [ start, end, batchLimit ]);
-
             let entries = 0;
             for (const [ keyBytes, bytes, encoding, versionstamp ] of rows) {
                 if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, keyBytes) || prefixBytes && equalBytes(prefixBytes, keyBytes))) continue;
