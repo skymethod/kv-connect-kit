@@ -2,11 +2,10 @@ import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
 import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
-import { checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
@@ -88,10 +87,9 @@ class SqliteKv extends BaseKv {
     private readonly decodeV8: DecodeV8;
     private readonly maxQueueAttempts: number;
     private readonly statements: Statements;
+    private readonly expirer: Expirer;
 
     private version = 0;
-    private minExpires: number | undefined;
-    private expirerTimeout = 0;
     private workerTimeout = 0;
     private queueHandler?: (value: unknown) => void | Promise<void>;
     private queueHandlerPromise?: Deferred<void>;
@@ -102,6 +100,7 @@ class SqliteKv extends BaseKv {
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
         this.statements = new Statements(db, debug);
+        this.expirer = new Expirer(debug, () => runExpirerTransaction(db, this.statements, debug));
         this.maxQueueAttempts = maxQueueAttempts;
 
         // initialize database
@@ -127,7 +126,8 @@ class SqliteKv extends BaseKv {
             db.execute(`create table if not exists queue_keys_if_undelivered(id integer, key blob, primary key (id, key)) without rowid`);
 
             // expire old keys
-            this.minExpires = runExpirerTransaction(db, this.statements, debug);
+            const minExpires = runExpirerTransaction(db, this.statements, debug);
+            this.expirer.init(minExpires);
 
             // unlock any locked queue items
             db.execute(`update queue set locked = null where locked is not null`);
@@ -139,9 +139,6 @@ class SqliteKv extends BaseKv {
                 if (debug) console.log(`SqliteKV(): version=${this.version}`);
             }
         });
-
-        // reschedule expirer if we have any expiring keys
-        if (this.minExpires !== undefined) this.rescheduleExpirer(this.minExpires);
     }
 
     static of(path: string, opts: SqliteServiceOptions = {}): Kv {
@@ -242,14 +239,14 @@ class SqliteKv extends BaseKv {
             }
             if (additionalWork) additionalWork();
             statements.query(`insert into prop(name, value) values ('versionstamp', ?) on conflict(name) do update set value = excluded.value`, [ newVersionstamp ]);
-            if (minExpires !== undefined) this.rescheduleExpirer(minExpires);
+            if (minExpires !== undefined) this.expirer.rescheduleExpirer(minExpires);
             if (minEnqueued !== undefined) this.rescheduleWorker();
             return { ok: true, versionstamp: newVersionstamp };
         });
     }
 
     protected close_(): void {
-        clearTimeout(this.expirerTimeout);
+        this.expirer.finalize();
         clearTimeout(this.workerTimeout);
         this.queueHandlerPromise?.resolve();
         this.statements.finalize();
@@ -303,27 +300,6 @@ class SqliteKv extends BaseKv {
     }
 
     //
-
-    private rescheduleExpirer(expires: number) {
-        const { minExpires, debug, expirerTimeout } = this;
-        if (minExpires !== undefined && minExpires < expires) return;
-        this.minExpires = expires;
-        clearTimeout(expirerTimeout);
-        const delay = expires - Date.now();
-        if (debug) console.log(`rescheduleExpirer: run in ${delay}ms`);
-        this.expirerTimeout = setTimeout(() => this.runExpirer(), delay);
-    }
-
-    private runExpirer() {
-        const { db, statements, debug } = this;
-        const newMinExpires = runExpirerTransaction(db, statements, debug);
-        this.minExpires = newMinExpires;
-        if (newMinExpires !== undefined) {
-            this.rescheduleExpirer(newMinExpires);
-        } else {
-            clearTimeout(this.expirerTimeout);
-        }
-    }
 
     private rescheduleWorker(delay = 0) {
         clearTimeout(this.workerTimeout);
@@ -406,4 +382,5 @@ class Statements {
         Object.values(cache).forEach(v => v.finalize());
         if (debug) console.log(`statements: finalized ${Object.keys(cache).length}`);
     }
+
 }

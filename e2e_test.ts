@@ -7,14 +7,14 @@ import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.t
 import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
 import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
 import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
-import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
 import { chunk } from 'https://deno.land/std@0.204.0/collections/chunk.ts';
+import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
 import { checkString } from './check.ts';
 import { makeNativeService, makeRemoteService } from './client.ts';
+import { makeInMemoryService } from './in_memory.ts';
 import { KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 import { SqliteNativeDriver } from './sqlite_native_driver.ts';
-import { makeInMemoryService } from './in_memory.ts';
 
 const flags = parseFlags(Deno.args);
 const debug = !!flags.debug;

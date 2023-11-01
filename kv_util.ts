@@ -279,3 +279,49 @@ export abstract class BaseKv implements Kv {
     }
 
 }
+
+export class Expirer {
+    private readonly debug: boolean;
+    private readonly expireFn: () => number | undefined;
+
+    private minExpires: number | undefined;
+    private expirerTimeout = 0;
+
+    constructor(debug: boolean, expireFn: () => number | undefined) {
+        this.debug = debug;
+        this.expireFn = expireFn;
+    }
+
+    init(minExpires: number | undefined) {
+        this.minExpires = minExpires;
+        if (this.minExpires !== undefined) this.rescheduleExpirer(this.minExpires);
+    }
+
+    rescheduleExpirer(expires: number) {
+        const { minExpires, debug, expirerTimeout } = this;
+        if (minExpires !== undefined && minExpires < expires) return;
+        this.minExpires = expires;
+        clearTimeout(expirerTimeout);
+        const delay = expires - Date.now();
+        if (debug) console.log(`rescheduleExpirer: run in ${delay}ms`);
+        this.expirerTimeout = setTimeout(() => this.runExpirer(), delay);
+    }
+
+    finalize() {
+        clearTimeout(this.expirerTimeout);
+    }
+
+    //
+
+    private runExpirer() {
+        const { expireFn } = this;
+        const newMinExpires = expireFn();
+        this.minExpires = newMinExpires;
+        if (newMinExpires !== undefined) {
+            this.rescheduleExpirer(newMinExpires);
+        } else {
+            clearTimeout(this.expirerTimeout);
+        }
+    }
+
+}
