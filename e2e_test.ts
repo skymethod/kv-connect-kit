@@ -22,9 +22,8 @@ const debug = !!flags.debug;
 Deno.test({
     name: 'e2e-kck-in-memory',
     only: false,
-    ignore: true, // TODO
     fn: async () => {
-        await endToEnd(makeInMemoryService({ debug }), { type: 'kck', path: 'a' });
+        await endToEnd(makeInMemoryService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path: ':memory:' });
     }
 });
 

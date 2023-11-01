@@ -1,3 +1,4 @@
+import { Deferred, deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn, isRecord, checkMatches } from './check.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
@@ -322,6 +323,41 @@ export class Expirer {
         } else {
             clearTimeout(this.expirerTimeout);
         }
+    }
+
+}
+
+export type QueueHandler = (value: unknown) => void | Promise<void>;
+
+export class QueueWorker {
+    
+    private readonly workerFn: (queueHandler?: QueueHandler) => void;
+
+    private workerTimeout = 0;
+    private queueHandler?: QueueHandler;
+    private queueHandlerPromise?: Deferred<void>;
+
+    constructor(workerFn: (queueHandler?: QueueHandler) => void) {
+        this.workerFn = workerFn;
+    }
+
+    listen(handler: QueueHandler): Promise<void> {
+        if (this.queueHandler) throw new Error(`Already called 'listenQueue'`); // for now
+        this.queueHandler = handler;
+        const rt = deferred<void>();
+        this.queueHandlerPromise = rt;
+        this.rescheduleWorker();
+        return rt;
+    }
+
+    rescheduleWorker(delay = 0) {
+        clearTimeout(this.workerTimeout);
+        if (this.queueHandler) this.workerTimeout = setTimeout(() => this.workerFn(this.queueHandler), delay);
+    }
+
+    finalize() {
+        clearTimeout(this.workerTimeout);
+        this.queueHandlerPromise?.resolve();
     }
 
 }

@@ -4,12 +4,15 @@ import { compareBytes, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, Enqueue, Expirer, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
+import { BaseKv, CursorHolder, Enqueue, Expirer, QueueHandler, QueueWorker, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
 
 export interface InMemoryServiceOptions {
 
     /** Enable some console logging */
     readonly debug?: boolean;
+
+    /** Maximum number of attempts to deliver a failing queue message before giving up. Defaults to 10. */
+    readonly maxQueueAttempts?: number;
 
 }
 
@@ -17,14 +20,14 @@ export interface InMemoryServiceOptions {
  * Creates a new KvService that creates in-memory kv instances
  */
 export function makeInMemoryService(opts: InMemoryServiceOptions = {}): KvService {
-    const { debug = false } = opts;
+    const { debug = false, maxQueueAttempts = 10 } = opts;
     const instances = new Map<string, InMemoryKv>();
     return {
         openKv: (url = '') => {
             let kv = instances.get(url);
             if (!kv) {
                 if (debug) console.log(`makeInMemoryService: new kv(${url})`);
-                kv = new InMemoryKv(debug);
+                kv = new InMemoryKv(debug, maxQueueAttempts);
                 instances.set(url, kv);
             }
             return Promise.resolve(kv);
@@ -42,16 +45,24 @@ const keyRow = (keyBytes: Uint8Array): KVRow => [ keyBytes, undefined, '', undef
 
 const copyValueIfNecessary = (v: unknown) => v instanceof _KvU64 ? v : structuredClone(v);
 
+type QueueItem = { id: number, value: unknown, enqueued: number, available: number, failures: number, keysIfUndelivered: KvKey[], locked: boolean };
+
 class InMemoryKv extends BaseKv {
 
     private readonly rows = new RedBlackTree<KVRow>((a, b) => compareBytes(a[0], b[0])); // keep sorted by keyBytes
+    private readonly queue = new Map<number, QueueItem>();
     private readonly expirer: Expirer;
+    private readonly queueWorker: QueueWorker;
+    private readonly maxQueueAttempts: number;
 
     private version = 0;
+    private nextQueueItemId = 1;
 
-    constructor(debug: boolean) {
+    constructor(debug: boolean, maxQueueAttempts: number) {
         super({ debug });
         this.expirer = new Expirer(debug, () => this.expire());
+        this.queueWorker = new QueueWorker(queueHandler => this.runWorker(queueHandler));
+        this.maxQueueAttempts = maxQueueAttempts;
     }
 
     protected get_<T = unknown>(key: KvKey, _consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<T>> {
@@ -97,7 +108,7 @@ class InMemoryKv extends BaseKv {
                 const key = unpackKey(keyBytes);
                 lastYieldedKeyBytes = keyBytes;
                 outCursor.set(packCursor({ lastYieldedKeyBytes })); // cursor needs to be set before yield
-                yield { key, value: value as T, versionstamp };
+                yield { key, value: copyValueIfNecessary(value) as T, versionstamp };
                 yielded++;
                 // console.log({ yielded, entries, limit });
                 if (typeof limit === 'number' && yielded >= limit) return;
@@ -106,13 +117,12 @@ class InMemoryKv extends BaseKv {
         }
     }
 
-    protected listenQueue_(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
-        // TODO listen
-        throw new Error('Method not implemented.');
+    protected listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
+        return this.queueWorker.listen(handler);
     }
 
     protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: (() => void) | undefined): Promise<KvCommitResult | KvCommitError> {
-        const { rows } = this;
+        const { rows, queue } = this;
         await Promise.resolve();
         for (const { key, versionstamp } of checks) {
             if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new Error(`Bad 'versionstamp': ${versionstamp}`);
@@ -124,19 +134,12 @@ class InMemoryKv extends BaseKv {
         let minEnqueued: number | undefined;
         const newVersionstamp = packVersionstamp(++this.version);
         for (const { value, opts = {} } of enqueues) {
-            // TODO implement enqueues/worker
-            throw new Error(`enqueues not implemented`);
-            // const { delay = 0, keysIfUndelivered = [] } = opts;
-            // const enqueued = Date.now();
-            // const available = enqueued + delay;
-            // const { data: bytes, encoding } = packKvValue(value, encodeV8);
-            // const [ row ] = statements.query<[ number ]>(`insert into queue(bytes, encoding, failures, enqueued, available) values (?, ?, ?, ?, ?) returning last_insert_rowid()`, [ bytes, encoding, 0, enqueued, available ]);
-            // const id = row[0];
-            // const keyMap = Object.fromEntries(keysIfUndelivered.map(packKey).map(v => [ encodeHex(v), v ]));
-            // for (const key of Object.values(keyMap)) {
-            //     statements.query(`insert into queue_keys_if_undelivered(id, key) values (?, ?)`, [ id, key ]);
-            // }
-            // minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
+            const { delay = 0, keysIfUndelivered = [] } = opts;
+            const enqueued = Date.now();
+            const available = enqueued + delay;
+            const id = this.nextQueueItemId++;
+            queue.set(id, { id, value: copyValueIfNecessary(value), enqueued, available, failures: 0, keysIfUndelivered, locked: false });
+            minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
         }
         for (const mutation of mutations) {
             const { key } = mutation;
@@ -168,14 +171,14 @@ class InMemoryKv extends BaseKv {
         }
         if (additionalWork) additionalWork();
         if (minExpires !== undefined) this.expirer.rescheduleExpirer(minExpires);
-        // TODO queue worker
-        // if (minEnqueued !== undefined) this.rescheduleWorker();
+        if (minEnqueued !== undefined) this.queueWorker.rescheduleWorker();
 
         return { ok: true, versionstamp: newVersionstamp };
     }
 
     protected close_(): void {
         this.expirer.finalize();
+        this.queueWorker.finalize();
     }
 
     //
@@ -185,8 +188,21 @@ class InMemoryKv extends BaseKv {
         return row ? { key, value: copyValueIfNecessary(row[1]) as T, versionstamp: row[2] } : { key, value: null, versionstamp: null };
     }
 
-    private listRows(opts: { start: Uint8Array, end: Uint8Array, reverse: boolean, batchLimit: number }): KVRow[] {
-        return [];
+    private listRows({ start, end, reverse, batchLimit }: { start: Uint8Array, end: Uint8Array, reverse: boolean, batchLimit: number }): KVRow[] {
+        const { rows } = this;
+        const rt: KVRow[] = [];
+        for (const row of reverse ? rows.rnlValues() : rows.lnrValues()) { // TODO use rbt to find start node faster
+            const keyBytes = row[0];
+            if (rt.length >= batchLimit) break;
+            if (reverse) {
+                if (compareBytes(keyBytes, start) < 0) break;
+                if (compareBytes(keyBytes, end) < 0) rt.push(row);
+            } else {
+                if (compareBytes(keyBytes, end) >= 0) break;
+                if (compareBytes(keyBytes, start) >= 0) rt.push(row);
+            }
+        }
+        return rt;
     }
 
     private expire(): number | undefined {
@@ -203,6 +219,53 @@ class InMemoryKv extends BaseKv {
         }
         remove.forEach(v => rows.remove(v));
         return minExpires;
+    }
+
+    private async runWorker(queueHandler?: QueueHandler) {
+        const { debug, queue } = this;
+        if (!queueHandler) {
+            if (debug) console.log(`runWorker: no queueHandler`);
+            return;
+        }
+        const time = Date.now();
+        const candidateIds = [...queue.values()].filter(v => v.available <= time && !v.locked).map(v => v.id);
+        if (candidateIds.length === 0) {
+            const nextAvailableItem = [...queue.values()].filter(v => !v.locked).sort((a, b) => a.available - b.available).at(0);
+            if (nextAvailableItem) {
+                const nextAvailableIn = nextAvailableItem.available - Date.now();
+                if (debug) console.log(`runWorker: no work (nextAvailableIn=${nextAvailableIn}ms)`);
+                this.queueWorker.rescheduleWorker(nextAvailableIn);
+            } else {
+                if (debug) console.log('runWorker: no work');
+            }
+            return;
+        }
+        const id = Math.min(...candidateIds);
+        const queueItem = queue.get(id)!;
+        queueItem.locked = true;
+        const { value, failures, keysIfUndelivered } = queueItem;
+        const deleteQueueItem = () =>   queue.delete(id);
+        try {
+            if (debug) console.log(`runWorker: dispatching ${id}: ${value}`);
+            await Promise.resolve(queueHandler(value));
+            if (debug) console.log(`runWorker: ${id} succeeded, clearing`);
+            deleteQueueItem();
+        } catch (e) {
+            const totalFailures = failures + 1;
+            if (debug) console.log(`runWorker: ${id} failed (totalFailures=${totalFailures}): ${e.stack || e}`);
+            if (totalFailures >= this.maxQueueAttempts) {
+                let atomic = this.atomic(deleteQueueItem);
+                for (const key of keysIfUndelivered) atomic = atomic.set(key, value);
+                await atomic.commit();
+                if (debug) console.log(`runWorker: give up on ${id}, keys=${keysIfUndelivered.length}`);
+            } else {
+                const available = Date.now() + 1000 * totalFailures;
+                queueItem.failures = totalFailures;
+                queueItem.available = available;
+                queueItem.locked = false;
+            }
+        }
+        this.queueWorker.rescheduleWorker();
     }
 
 }

@@ -31,8 +31,8 @@ export function computeBigintMinimumNumberOfBytes(val: bigint): number {
 export function compareBytes(lhs: Uint8Array, rhs: Uint8Array): number {
     if (lhs === rhs) return 0;
 
-    const len = Math.min(lhs.length, rhs.length);
-    let x = 0, y = 0;
+    let x = lhs.length, y = rhs.length;
+    const len = Math.min(x, y);
 
     for (let i = 0; i < len; i++) {
         if (lhs[i] !== rhs[i]) {

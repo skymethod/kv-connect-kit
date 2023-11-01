@@ -1,11 +1,10 @@
 import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_instance_of.ts';
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
-import { deferred, Deferred } from 'https://deno.land/std@0.204.0/async/deferred.ts';
 import { encodeHex, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, QueueHandler, QueueWorker, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
@@ -88,11 +87,9 @@ class SqliteKv extends BaseKv {
     private readonly maxQueueAttempts: number;
     private readonly statements: Statements;
     private readonly expirer: Expirer;
+    private readonly queueWorker: QueueWorker;
 
     private version = 0;
-    private workerTimeout = 0;
-    private queueHandler?: (value: unknown) => void | Promise<void>;
-    private queueHandlerPromise?: Deferred<void>;
 
     private constructor(db: SqliteDb, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
         super({ debug });
@@ -101,6 +98,7 @@ class SqliteKv extends BaseKv {
         this.decodeV8 = decodeV8;
         this.statements = new Statements(db, debug);
         this.expirer = new Expirer(debug, () => runExpirerTransaction(db, this.statements, debug));
+        this.queueWorker = new QueueWorker(queueHandler => this.runWorker(queueHandler));
         this.maxQueueAttempts = maxQueueAttempts;
 
         // initialize database
@@ -174,12 +172,7 @@ class SqliteKv extends BaseKv {
     }
 
     protected listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
-        if (this.queueHandler) throw new Error(`Already called 'listenQueue'`); // for now
-        this.queueHandler = handler;
-        const rt = deferred<void>();
-        this.queueHandlerPromise = rt;
-        this.rescheduleWorker();
-        return rt;
+        return this.queueWorker.listen(handler);
     }
 
     protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: () => void): Promise<KvCommitResult | KvCommitError> {
@@ -240,15 +233,14 @@ class SqliteKv extends BaseKv {
             if (additionalWork) additionalWork();
             statements.query(`insert into prop(name, value) values ('versionstamp', ?) on conflict(name) do update set value = excluded.value`, [ newVersionstamp ]);
             if (minExpires !== undefined) this.expirer.rescheduleExpirer(minExpires);
-            if (minEnqueued !== undefined) this.rescheduleWorker();
+            if (minEnqueued !== undefined) this.queueWorker.rescheduleWorker();
             return { ok: true, versionstamp: newVersionstamp };
         });
     }
 
     protected close_(): void {
         this.expirer.finalize();
-        clearTimeout(this.workerTimeout);
-        this.queueHandlerPromise?.resolve();
+        this.queueWorker.finalize();
         this.statements.finalize();
         this.db.close();
     }
@@ -301,13 +293,8 @@ class SqliteKv extends BaseKv {
 
     //
 
-    private rescheduleWorker(delay = 0) {
-        clearTimeout(this.workerTimeout);
-        if (this.queueHandler) this.workerTimeout = setTimeout(() => this.runWorker(), delay);
-    }
-
-    private async runWorker() {
-        const { db, statements, decodeV8, queueHandler, debug } = this;
+    private async runWorker(queueHandler?: QueueHandler) {
+        const { db, statements, decodeV8, debug } = this;
         if (!queueHandler) {
             if (debug) console.log(`runWorker: no queueHandler`);
             return;
@@ -319,7 +306,7 @@ class SqliteKv extends BaseKv {
             if (typeof nextAvailable === 'number') {
                 const nextAvailableIn = nextAvailable - Date.now();
                 if (debug) console.log(`runWorker: no work (nextAvailableIn=${nextAvailableIn}ms)`);
-                this.rescheduleWorker(nextAvailableIn);
+                this.queueWorker.rescheduleWorker(nextAvailableIn);
             } else {
                 if (debug) console.log('runWorker: no work');
             }
@@ -351,7 +338,7 @@ class SqliteKv extends BaseKv {
                 statements.query(`update queue set locked = null, failures = ?, available = ? where id = ?`, [ totalFailures, available, id ]);
             }
         }
-        this.rescheduleWorker();
+        this.queueWorker.rescheduleWorker();
     }
 
 }
