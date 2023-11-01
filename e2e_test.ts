@@ -14,9 +14,19 @@ import { makeNativeService, makeRemoteService } from './client.ts';
 import { KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 import { SqliteNativeDriver } from './sqlite_native_driver.ts';
+import { makeInMemoryService } from './in_memory.ts';
 
 const flags = parseFlags(Deno.args);
 const debug = !!flags.debug;
+
+Deno.test({
+    name: 'e2e-kck-in-memory',
+    only: false,
+    ignore: true, // TODO
+    fn: async () => {
+        await endToEnd(makeInMemoryService({ debug }), { type: 'kck', path: 'a' });
+    }
+});
 
 Deno.test({
     name: 'e2e-deno-memory',

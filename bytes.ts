@@ -27,3 +27,20 @@ export function computeBigintMinimumNumberOfBytes(val: bigint): number {
     }
     return n;
 }
+
+export function compareBytes(lhs: Uint8Array, rhs: Uint8Array): number {
+    if (lhs === rhs) return 0;
+
+    const len = Math.min(lhs.length, rhs.length);
+    let x = 0, y = 0;
+
+    for (let i = 0; i < len; i++) {
+        if (lhs[i] !== rhs[i]) {
+            x = lhs[i];
+            y = rhs[i];
+            break;
+        }
+    }
+    
+    return x < y ? -1 : y < x ? 1 : 0;
+}

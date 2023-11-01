@@ -6,7 +6,7 @@ import { checkMatches } from './check.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, KvValueEncoding, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
@@ -53,14 +53,6 @@ export function makeSqliteService(opts?: SqliteServiceOptions): KvService {
 
 const SCHEMA = 1;
 
-const packVersionstamp = (version: number) => `${version.toString().padStart(16, '0')}0000`;
-
-const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
-
-const isValidVersionstamp = (versionstamp: string) => /^(\d{16})0000$/.test(versionstamp);
-
-const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
-
 function querySingleValue<T>(key: KvKey, statements: Statements, decodeV8: DecodeV8): { value: T, versionstamp: string } | undefined {
     const keyBytes = packKey(key);
     const [ row ] = statements.query<[ Uint8Array, KvValueEncoding, string ]>('select bytes, encoding, versionstamp from kv where key = ?', [ keyBytes ]);
@@ -92,6 +84,8 @@ function tryParseInt(str: string): number | undefined {
 class SqliteKv extends BaseKv {
 
     private readonly db: SqliteDb;
+    private readonly encodeV8: EncodeV8;
+    private readonly decodeV8: DecodeV8;
     private readonly maxQueueAttempts: number;
     private readonly statements: Statements;
 
@@ -103,8 +97,10 @@ class SqliteKv extends BaseKv {
     private queueHandlerPromise?: Deferred<void>;
 
     private constructor(db: SqliteDb, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, maxQueueAttempts: number) {
-        super({ debug, encodeV8, decodeV8 });
+        super({ debug });
         this.db = db;
+        this.encodeV8 = encodeV8;
+        this.decodeV8 = decodeV8;
         this.statements = new Statements(db, debug);
         this.maxQueueAttempts = maxQueueAttempts;
 

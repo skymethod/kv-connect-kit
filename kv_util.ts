@@ -1,5 +1,5 @@
 import { decodeHex, encodeHex } from './bytes.ts';
-import { checkKeyNotEmpty, checkExpireIn, isRecord } from './check.ts';
+import { checkKeyNotEmpty, checkExpireIn, isRecord, checkMatches } from './check.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
@@ -75,6 +75,14 @@ export function checkListOptions(options: KvListOptions): KvListOptions {
     if (!(batchSize === undefined || typeof batchSize === 'number' && batchSize > 0 && Number.isSafeInteger(batchSize) && batchSize <= 1000)) throw new TypeError(`Bad 'batchSize': ${batchSize}`);
     return { limit, cursor, reverse, consistency, batchSize };
 }
+
+export const packVersionstamp = (version: number) => `${version.toString().padStart(16, '0')}0000`;
+
+export const unpackVersionstamp = (versionstamp: string) => parseInt(checkMatches('versionstamp', versionstamp, /^(\d{16})0000$/)[1]);
+
+export const isValidVersionstamp = (versionstamp: string) => /^(\d{16})0000$/.test(versionstamp);
+
+export const replacer = (_this: unknown, v: unknown) => typeof v === 'bigint' ? v.toString() : v;
 
 export class CursorHolder {
     private cursor: string | undefined;
@@ -190,15 +198,10 @@ export class GenericAtomicOperation implements AtomicOperation {
 export abstract class BaseKv implements Kv {
 
     protected readonly debug: boolean;
-    protected readonly encodeV8: EncodeV8;
-    protected readonly decodeV8: DecodeV8;
-
     private closed = false;
 
-    protected constructor({ debug, encodeV8, decodeV8 }: { debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8 }) {
+    protected constructor({ debug }: { debug: boolean }) {
         this.debug = debug;
-        this.encodeV8 = encodeV8;
-        this.decodeV8 = decodeV8;
     }
 
     async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
