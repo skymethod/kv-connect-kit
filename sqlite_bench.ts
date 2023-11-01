@@ -1,4 +1,5 @@
 import { makeNativeService } from './client.ts';
+import { makeInMemoryService } from './in_memory.ts';
 import { KvService } from './kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 import { SqliteNativeDriver } from './sqlite_native_driver.ts';
@@ -34,6 +35,10 @@ Deno.bench('deno-sqlite-disk', { group: 'sqlite-disk', baseline: true, only: fal
     } finally {
         await Deno.remove(path);
     }
+});
+
+Deno.bench('kck-in-memory', { group: 'sqlite-memory', baseline: false, only: false }, async () => {
+    await runBenchmarks(makeInMemoryService({ debug: false }), ':memory:', 5000);
 });
 
 Deno.bench('kck-wasm-sqlite-memory', { group: 'sqlite-memory', baseline: false, only: false }, async () => {
