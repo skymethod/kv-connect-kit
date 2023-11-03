@@ -1,13 +1,12 @@
 import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
-import { checkExpireIn, checkKeyNotEmpty } from './check.ts';
 import { DatabaseMetadata, EndpointInfo, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
 import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
+import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { CursorHolder, DecodeV8, EncodeV8, GenericKvListIterator, checkListOptions, checkListSelector, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, Enqueue, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
 
@@ -104,7 +103,7 @@ function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutati
     }
 }
 
-function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): Enqueue {
+function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): EnqueueMessage {
     return {
         backoffSchedule: [ 100, 200, 400, 800 ],
         deadlineMs: `${Date.now() + delay}`,
@@ -150,22 +149,20 @@ function atomicWriteToString(req: AtomicWrite): string {
 
 //
 
-class RemoteKv implements Kv {
+class RemoteKv extends BaseKv {
 
     private readonly url: string;
     private readonly accessToken: string;
-    private readonly debug: boolean;
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
     private readonly fetcher: Fetcher;
 
     private metadata: DatabaseMetadata;
-    private closed = false;
 
     private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, metadata: DatabaseMetadata) {
+        super({ debug });
         this.url = url;
         this.accessToken = accessToken;
-        this.debug = debug;
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
         this.fetcher = fetcher;
@@ -183,9 +180,7 @@ class RemoteKv implements Kv {
         return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, fetcher, metadata);
     }
 
-    async get<T = unknown>(key: KvKey, { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<KvEntryMaybe<T>> {
-        this.checkOpen('get');
-        checkKeyNotEmpty(key);
+    protected async get_<T = unknown>(key: KvKey, consistency?: KvConsistencyLevel): Promise<KvEntryMaybe<T>> {
         const { decodeV8 } = this;
         const packedKey = packKey(key);
         const req: SnapshotRead = {
@@ -200,11 +195,8 @@ class RemoteKv implements Kv {
         return { key, value: null, versionstamp: null };
     }
 
-    // deno-lint-ignore no-explicit-any
-    async getMany<T>(keys: readonly KvKey[], { consistency }: { consistency?: KvConsistencyLevel } = {}): Promise<any> {
-        this.checkOpen('getMany');
+    protected async getMany_(keys: readonly KvKey[], consistency?: KvConsistencyLevel): Promise<KvEntryMaybe<unknown>[]> {
         const { decodeV8 } = this;
-        keys.forEach(checkKeyNotEmpty);
         const packedKeys = keys.map(packKey);
         const packedKeysHex = packedKeys.map(encodeHex);
         const req: SnapshotRead = {
@@ -214,140 +206,36 @@ class RemoteKv implements Kv {
         const rowMap = new Map<string, { key: KvKey, value: unknown, versionstamp: string }>();
         for (const range of res.ranges) {
             for (const { key, value, encoding, versionstamp } of range.values) {
-                rowMap.set(encodeHex(key), { key: unpackKey(key), value: readValue(value, encoding, decodeV8) as T, versionstamp: encodeHex(versionstamp) })
+                rowMap.set(encodeHex(key), { key: unpackKey(key), value: readValue(value, encoding, decodeV8), versionstamp: encodeHex(versionstamp) })
             }
         }
         return keys.map((key, i) => {
             const row = rowMap.get(packedKeysHex[i]);
-            return { key, value: row?.value ?? null, versionstamp: row?.versionstamp ?? null };
+            return row ? { key, value: row.value, versionstamp: row.versionstamp } : { key, value: null, versionstamp: null };
         });
     }
 
-    async set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): Promise<KvCommitResult> {
-        this.checkOpen('set');
-        checkExpireIn(expireIn);
-        checkKeyNotEmpty(key);
-        const { encodeV8 } = this;
-        const req: AtomicWrite = {
-            enqueues: [],
-            kvChecks: [],
-            kvMutations: [
-                {
-                    key: packKey(key),
-                    mutationType: 'M_SET',
-                    value: packKvValue(value, encodeV8),
-                    expireAtMs: typeof expireIn === 'number' ? (Date.now() + expireIn).toString() : '0',
-                }
-            ],
-        };
-        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
-        if (status !== 'AW_SUCCESS') throw new Error(`set failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
-        return { ok: true, versionstamp: encodeHex(versionstamp) };
-    }
-
-    async delete(key: KvKey): Promise<void> {
-        this.checkOpen('delete');
-        const req: AtomicWrite = {
-            enqueues: [],
-            kvChecks: [],
-            kvMutations: [
-                {
-                    key: packKey(key),
-                    mutationType: 'M_CLEAR',
-                    expireAtMs: '0',
-                }
-            ],
-        };
-        const res = await this.atomicWrite(req);
-        const { status, primaryIfWriteDisabled } = res;
-        if (status !== 'AW_SUCCESS') throw new Error(`set failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
-    }
-
-    list<T = unknown>(selector: KvListSelector, options: KvListOptions = {}): KvListIterator<T> {
-        this.checkOpen('list');
-        checkListSelector(selector);
-        options = checkListOptions(options);
-        const outCursor = new CursorHolder();
-        const generator: AsyncGenerator<KvEntry<T>> = this.listStream(outCursor, selector, options);
-        return new GenericKvListIterator<T>(generator, () => outCursor.get());
-    }
-
-    async enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): Promise<KvCommitResult> {
-        this.checkOpen('enqueue');
-        const { encodeV8 } = this;
-        const req: AtomicWrite = {
-            enqueues: [
-                computeEnqueueMessage(value, encodeV8, opts),
-            ],
-            kvChecks: [],
-            kvMutations: [],
-        };
-        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
-        if (status !== 'AW_SUCCESS') throw new Error(`enqueue failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
-        return { ok: true, versionstamp: encodeHex(versionstamp) };
-    }
-
-    listenQueue(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
+    listenQueue_(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
         throw new Error(`'listenQueue' is not possible over KV Connect`);
     }
 
-    atomic(): AtomicOperation {
-        let commitCalled = false;
-        return new RemoteAtomicOperation(this.encodeV8, async req => {
-            this.checkOpen('commit');
-            if (commitCalled) throw new Error(`'commit' already called for this atomic`);
-            const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(req);
-            commitCalled = true;
-            if (status === 'AW_CHECK_FAILURE') return { ok: false };
-            if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
-            return { ok: true, versionstamp: encodeHex(versionstamp) };
-        });
+    protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[]): Promise<KvCommitResult | KvCommitError> {
+        const write: AtomicWrite = {
+            kvChecks: checks.map(computeKvCheckMessage),
+            kvMutations: mutations.map(v => computeKvMutationMessage(v, this.encodeV8)),
+            enqueues: enqueues.map(({ value, opts }) => computeEnqueueMessage(value, this.encodeV8, opts)),
+        };
+        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(write);
+        if (status === 'AW_CHECK_FAILURE') return { ok: false };
+        if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+        return { ok: true, versionstamp: encodeHex(versionstamp) };
     }
 
-    close(): void {
-        this.checkOpen('close');
-        this.closed = true;
+    protected close_(): void {
         // no persistent resources yet
     }
 
-    //
-
-    private checkOpen(method: string) {
-        if (this.closed) throw new Error(`Cannot call '.${method}' after '.close' is called`);
-    }
-
-    private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
-        const { url, accessToken, debug, fetcher } = this;
-        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
-            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher);
-        }
-        const { metadata } = this;
-        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
-        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
-        const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
-        if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
-        return endpoint;
-    }
-
-    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
-        const { metadata, debug, fetcher } = this;
-        const endpoint = await this.locateEndpoint(consistency);
-        const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
-        const accessToken = metadata.token;
-        if (debug) console.log(`fetchSnapshotRead: ${snapshotReadToString(req)}`);
-        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher);
-    }
-
-    private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
-        const { metadata, debug, fetcher } = this;
-        const endpoint = await this.locateEndpoint('strong');
-        const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
-        const accessToken = metadata.token;
-        if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
-        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher);
-    }
-
-    private async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
+    protected async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
         const { decodeV8 } = this;
         let yielded = 0;
         if (typeof limit === 'number' && yielded >= limit) return;
@@ -397,66 +285,38 @@ class RemoteKv implements Kv {
             if (entries < batchLimit) return;
         }
     }
-}
 
+    //
 
-
-class RemoteAtomicOperation implements AtomicOperation {
-
-    private readonly encodeV8: EncodeV8;
-    private readonly _commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>;
-    private readonly write: AtomicWrite = { enqueues: [], kvChecks: [], kvMutations: [] };
-
-    constructor(encodeV8: EncodeV8, commit: (write: AtomicWrite) => Promise<KvCommitResult | KvCommitError>) {
-        this.encodeV8 = encodeV8;
-        this._commit = commit;
+    private async locateEndpoint(consistency: KvConsistencyLevel): Promise<EndpointInfo> {
+        const { url, accessToken, debug, fetcher } = this;
+        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher);
+        }
+        const { metadata } = this;
+        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
+        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
+        const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
+        if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
+        return endpoint;
     }
 
-    check(...checks: AtomicCheck[]): this {
-        this.write.kvChecks.push(...checks.map(computeKvCheckMessage));
-        return this;
+    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
+        const { metadata, debug, fetcher } = this;
+        const endpoint = await this.locateEndpoint(consistency);
+        const snapshotReadUrl = new URL('/snapshot_read', endpoint.url).toString();
+        const accessToken = metadata.token;
+        if (debug) console.log(`fetchSnapshotRead: ${snapshotReadToString(req)}`);
+        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher);
     }
 
-    mutate(...mutations: KvMutation[]): this {
-        mutations.map(v => v.key).forEach(checkKeyNotEmpty);
-        mutations.forEach(v => v.type === 'set' && checkExpireIn(v.expireIn));
-        this.write.kvMutations.push(...mutations.map(v => computeKvMutationMessage(v, this.encodeV8)));
-        return this;
+    private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
+        const { metadata, debug, fetcher } = this;
+        const endpoint = await this.locateEndpoint('strong');
+        const atomicWriteUrl = new URL('/atomic_write', endpoint.url).toString();
+        const accessToken = metadata.token;
+        if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
+        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher);
     }
-
-    sum(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'sum', key, value: new _KvU64(n) });
-    }
-
-    min(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'min', key, value: new _KvU64(n) });
-    }
-
-    max(key: KvKey, n: bigint): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'max', key, value: new _KvU64(n) });
-    }
-
-    set(key: KvKey, value: unknown, { expireIn }: { expireIn?: number } = {}): this {
-        checkExpireIn(expireIn);
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'set', key, value, expireIn });
-    }
-
-    delete(key: KvKey): this {
-        checkKeyNotEmpty(key);
-        return this.mutate({ type: 'delete', key });
-    }
-
-    enqueue(value: unknown, opts?: { delay?: number, keysIfUndelivered?: KvKey[] }): this {
-        this.write.enqueues.push(computeEnqueueMessage(value, this.encodeV8, opts));
-        return this;
-    }
-
-    commit(): Promise<KvCommitResult | KvCommitError> {
-        return this._commit(this.write);
-    }
-
+    
 }
