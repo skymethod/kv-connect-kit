@@ -1,13 +1,13 @@
 import { assertInstanceOf } from 'https://deno.land/std@0.204.0/assert/assert_instance_of.ts';
 import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
-import { encodeHex, equalBytes } from './bytes.ts';
-import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
-import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, QueueHandler, QueueWorker, readValue, replacer, unpackCursor, unpackVersionstamp } from './kv_util.ts';
+import { encodeHex, equalBytes } from '../src/bytes.ts';
+import { packKey, unpackKey } from '../src/kv_key.ts';
+import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from '../src/kv_types.ts';
+import { _KvU64 } from '../src/kv_u64.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, QueueHandler, QueueWorker, readValue, replacer, unpackCursor, unpackVersionstamp } from '../src/kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
-import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
+import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from '../src/v8.ts';
 
 export interface SqliteServiceOptions {
 
