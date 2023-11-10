@@ -94,6 +94,7 @@ const localKvUrl = (await Deno.permissions.query({ name: 'env', variable: 'LOCAL
 if (typeof localKvAccessToken === 'string' && localKvUrl) {
     Deno.test({
         only: false,
+        ignore: true, // TODO won't work pre 1.38
         name: 'e2e-deno-localkv',
         fn: async () => {
             const path = localKvUrl;

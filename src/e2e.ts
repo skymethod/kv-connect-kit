@@ -12,8 +12,7 @@ import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 
 export async function endToEnd(service: KvService, { type, path }: { type: 'deno' | 'kck', path: string }) {
 
-    const pathType = path === ':memory:' ? 'memory' : path.startsWith('https://') ? 'remote' : 'disk';
-
+    const pathType = path === ':memory:' ? 'memory' : /^https?:\/\//.test(path) ? 'remote' : 'disk';
     const kv = await service.openKv(path);
 
     // basic get/set, trivial list, noop commit

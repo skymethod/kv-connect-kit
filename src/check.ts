@@ -5,6 +5,10 @@ export function isRecord(obj: unknown): obj is Record<string, unknown> {
     return typeof obj === 'object' && obj !== null && !Array.isArray(obj) && obj.constructor === Object;
 }
 
+export function isDateTime(value: string): boolean {
+    return typeof value === 'string' && /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?Z$/.test(value);
+}
+
 export function checkKeyNotEmpty(key: KvKey): void {
     if (key.length === 0) throw new AssertionError(`Key cannot be empty`);
 }
