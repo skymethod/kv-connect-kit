@@ -1,8 +1,8 @@
-import { encodeBinary as encodeAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
-import { encodeBinary as encodeSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
-import { decodeBinary as decodeSnapshotReadOutput } from './proto/messages/datapath/SnapshotReadOutput.ts';
-import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/datapath/AtomicWriteOutput.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
+import { encodeBinary as encodeAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
+import { encodeBinary as encodeSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
+import { decodeBinary as decodeSnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/SnapshotReadOutput.ts';
+import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/com/deno/kv/datapath/AtomicWriteOutput.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { isRecord } from './check.ts';
 
 // https://github.com/denoland/deno/tree/main/ext/kv#kv-connect

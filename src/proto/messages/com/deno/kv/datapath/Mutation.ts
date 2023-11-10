@@ -7,44 +7,44 @@ import {
   decodeBinary as decodeBinary_1,
 } from "./KvValue.ts";
 import {
-  Type as KvMutationType,
+  Type as MutationType,
   name2num,
   num2name,
-} from "./KvMutationType.ts";
+} from "./MutationType.ts";
 import {
   tsValueToJsonValueFns,
   jsonValueToTsValueFns,
-} from "../../runtime/json/scalar.ts";
+} from "../../../../../runtime/json/scalar.ts";
 import {
   WireMessage,
   WireType,
-} from "../../runtime/wire/index.ts";
+} from "../../../../../runtime/wire/index.ts";
 import {
   default as serialize,
-} from "../../runtime/wire/serialize.ts";
+} from "../../../../../runtime/wire/serialize.ts";
 import {
   tsValueToWireValueFns,
   wireValueToTsValueFns,
-} from "../../runtime/wire/scalar.ts";
+} from "../../../../../runtime/wire/scalar.ts";
 import {
   default as Long,
-} from "../../runtime/Long.ts";
+} from "../../../../../runtime/Long.ts";
 import {
   default as deserialize,
-} from "../../runtime/wire/deserialize.ts";
+} from "../../../../../runtime/wire/deserialize.ts";
 
-export declare namespace $.datapath {
-  export type KvMutation = {
+export declare namespace $.com.deno.kv.datapath {
+  export type Mutation = {
     key: Uint8Array;
     value?: KvValue;
-    mutationType: KvMutationType;
+    mutationType: MutationType;
     expireAtMs: string;
   }
 }
 
-export type Type = $.datapath.KvMutation;
+export type Type = $.com.deno.kv.datapath.Mutation;
 
-export function getDefaultValue(): $.datapath.KvMutation {
+export function getDefaultValue(): $.com.deno.kv.datapath.Mutation {
   return {
     key: new Uint8Array(),
     value: undefined,
@@ -53,14 +53,14 @@ export function getDefaultValue(): $.datapath.KvMutation {
   };
 }
 
-export function createValue(partialValue: Partial<$.datapath.KvMutation>): $.datapath.KvMutation {
+export function createValue(partialValue: Partial<$.com.deno.kv.datapath.Mutation>): $.com.deno.kv.datapath.Mutation {
   return {
     ...getDefaultValue(),
     ...partialValue,
   };
 }
 
-export function encodeJson(value: $.datapath.KvMutation): unknown {
+export function encodeJson(value: $.com.deno.kv.datapath.Mutation): unknown {
   const result: any = {};
   if (value.key !== undefined) result.key = tsValueToJsonValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = encodeJson_1(value.value);
@@ -69,16 +69,16 @@ export function encodeJson(value: $.datapath.KvMutation): unknown {
   return result;
 }
 
-export function decodeJson(value: any): $.datapath.KvMutation {
+export function decodeJson(value: any): $.com.deno.kv.datapath.Mutation {
   const result = getDefaultValue();
   if (value.key !== undefined) result.key = jsonValueToTsValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = decodeJson_1(value.value);
-  if (value.mutationType !== undefined) result.mutationType = jsonValueToTsValueFns.enum(value.mutationType) as KvMutationType;
+  if (value.mutationType !== undefined) result.mutationType = jsonValueToTsValueFns.enum(value.mutationType) as MutationType;
   if (value.expireAtMs !== undefined) result.expireAtMs = jsonValueToTsValueFns.int64(value.expireAtMs);
   return result;
 }
 
-export function encodeBinary(value: $.datapath.KvMutation): Uint8Array {
+export function encodeBinary(value: $.com.deno.kv.datapath.Mutation): Uint8Array {
   const result: WireMessage = [];
   if (value.key !== undefined) {
     const tsValue = value.key;
@@ -107,7 +107,7 @@ export function encodeBinary(value: $.datapath.KvMutation): Uint8Array {
   return serialize(result);
 }
 
-export function decodeBinary(binary: Uint8Array): $.datapath.KvMutation {
+export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.Mutation {
   const result = getDefaultValue();
   const wireMessage = deserialize(binary);
   const wireFields = new Map(wireMessage);

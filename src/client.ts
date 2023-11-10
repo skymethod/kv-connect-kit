@@ -4,15 +4,15 @@ import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
-import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/datapath/AtomicWrite.ts';
-import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
+import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
+import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
+import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvCheckMessage, Mutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
-export * as SnapshotReadProto from './proto/messages/datapath/SnapshotRead.ts';
-export * as SnapshotReadOutputProto from './proto/messages/datapath/SnapshotReadOutput.ts';
-export * as AtomicWriteProto from './proto/messages/datapath/AtomicWrite.ts';
-export * as AtomicWriteOutputProto from './proto/messages/datapath/AtomicWriteOutput.ts';
+export * as SnapshotReadProto from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
+export * as SnapshotReadOutputProto from './proto/messages/com/deno/kv/datapath/SnapshotReadOutput.ts';
+export * as AtomicWriteProto from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
+export * as AtomicWriteOutputProto from './proto/messages/com/deno/kv/datapath/AtomicWriteOutput.ts';
 
 type Fetcher = typeof fetch;
 
@@ -90,7 +90,7 @@ function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
     }
 }
 
-function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheck {
+function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheckMessage {
     return {
         key: packKey(key),
         versionstamp: (versionstamp === null || versionstamp === undefined) ? emptyVersionstamp : decodeHex(versionstamp),
@@ -101,7 +101,7 @@ function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutati
     const { key, type } = mut;
     return {
         key: packKey(key),
-        mutationType: type === 'delete' ? 'M_CLEAR' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
+        mutationType: type === 'delete' ? 'M_DELETE' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
         value: mut.type === 'delete' ? undefined : packKvValue(mut.value, encodeV8),
         expireAtMs: mut.type === 'set' && typeof mut.expireIn === 'number' ? (Date.now() + mut.expireIn).toString() : '0',
     }
@@ -225,13 +225,13 @@ class RemoteKv extends BaseKv {
 
     protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[]): Promise<KvCommitResult | KvCommitError> {
         const write: AtomicWrite = {
-            kvChecks: checks.map(computeKvCheckMessage),
-            kvMutations: mutations.map(v => computeKvMutationMessage(v, this.encodeV8)),
+            checks: checks.map(computeKvCheckMessage),
+            mutations: mutations.map(v => computeKvMutationMessage(v, this.encodeV8)),
             enqueues: enqueues.map(({ value, opts }) => computeEnqueueMessage(value, this.encodeV8, opts)),
         };
-        const { status, primaryIfWriteDisabled, versionstamp } = await this.atomicWrite(write);
+        const { status, versionstamp } = await this.atomicWrite(write);
         if (status === 'AW_CHECK_FAILURE') return { ok: false };
-        if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}${ primaryIfWriteDisabled.length > 0 ? ` primaryIfWriteDisabled=${primaryIfWriteDisabled}` : ''}`);
+        if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}`);
         return { ok: true, versionstamp: encodeHex(versionstamp) };
     }
 

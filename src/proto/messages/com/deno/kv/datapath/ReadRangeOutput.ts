@@ -8,52 +8,52 @@ import {
 } from "./KvEntry.ts";
 import {
   jsonValueToTsValueFns,
-} from "../../runtime/json/scalar.ts";
+} from "../../../../../runtime/json/scalar.ts";
 import {
   WireMessage,
   WireType,
-} from "../../runtime/wire/index.ts";
+} from "../../../../../runtime/wire/index.ts";
 import {
   default as serialize,
-} from "../../runtime/wire/serialize.ts";
+} from "../../../../../runtime/wire/serialize.ts";
 import {
   default as deserialize,
-} from "../../runtime/wire/deserialize.ts";
+} from "../../../../../runtime/wire/deserialize.ts";
 
-export declare namespace $.datapath {
+export declare namespace $.com.deno.kv.datapath {
   export type ReadRangeOutput = {
     values: KvEntry[];
   }
 }
 
-export type Type = $.datapath.ReadRangeOutput;
+export type Type = $.com.deno.kv.datapath.ReadRangeOutput;
 
-export function getDefaultValue(): $.datapath.ReadRangeOutput {
+export function getDefaultValue(): $.com.deno.kv.datapath.ReadRangeOutput {
   return {
     values: [],
   };
 }
 
-export function createValue(partialValue: Partial<$.datapath.ReadRangeOutput>): $.datapath.ReadRangeOutput {
+export function createValue(partialValue: Partial<$.com.deno.kv.datapath.ReadRangeOutput>): $.com.deno.kv.datapath.ReadRangeOutput {
   return {
     ...getDefaultValue(),
     ...partialValue,
   };
 }
 
-export function encodeJson(value: $.datapath.ReadRangeOutput): unknown {
+export function encodeJson(value: $.com.deno.kv.datapath.ReadRangeOutput): unknown {
   const result: any = {};
   result.values = value.values.map(value => encodeJson_1(value));
   return result;
 }
 
-export function decodeJson(value: any): $.datapath.ReadRangeOutput {
+export function decodeJson(value: any): $.com.deno.kv.datapath.ReadRangeOutput {
   const result = getDefaultValue();
   result.values = value.values?.map((value: any) => decodeJson_1(value)) ?? [];
   return result;
 }
 
-export function encodeBinary(value: $.datapath.ReadRangeOutput): Uint8Array {
+export function encodeBinary(value: $.com.deno.kv.datapath.ReadRangeOutput): Uint8Array {
   const result: WireMessage = [];
   for (const tsValue of value.values) {
     result.push(
@@ -63,7 +63,7 @@ export function encodeBinary(value: $.datapath.ReadRangeOutput): Uint8Array {
   return serialize(result);
 }
 
-export function decodeBinary(binary: Uint8Array): $.datapath.ReadRangeOutput {
+export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.ReadRangeOutput {
   const result = getDefaultValue();
   const wireMessage = deserialize(binary);
   const wireFields = new Map(wireMessage);

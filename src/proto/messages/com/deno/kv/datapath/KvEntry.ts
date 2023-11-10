@@ -1,43 +1,43 @@
 // @ts-nocheck
 import {
-  Type as KvValueEncoding,
+  Type as ValueEncoding,
   name2num,
   num2name,
-} from "./KvValueEncoding.ts";
+} from "./ValueEncoding.ts";
 import {
   tsValueToJsonValueFns,
   jsonValueToTsValueFns,
-} from "../../runtime/json/scalar.ts";
+} from "../../../../../runtime/json/scalar.ts";
 import {
   WireMessage,
   WireType,
-} from "../../runtime/wire/index.ts";
+} from "../../../../../runtime/wire/index.ts";
 import {
   default as serialize,
-} from "../../runtime/wire/serialize.ts";
+} from "../../../../../runtime/wire/serialize.ts";
 import {
   tsValueToWireValueFns,
   wireValueToTsValueFns,
-} from "../../runtime/wire/scalar.ts";
+} from "../../../../../runtime/wire/scalar.ts";
 import {
   default as Long,
-} from "../../runtime/Long.ts";
+} from "../../../../../runtime/Long.ts";
 import {
   default as deserialize,
-} from "../../runtime/wire/deserialize.ts";
+} from "../../../../../runtime/wire/deserialize.ts";
 
-export declare namespace $.datapath {
+export declare namespace $.com.deno.kv.datapath {
   export type KvEntry = {
     key: Uint8Array;
     value: Uint8Array;
-    encoding: KvValueEncoding;
+    encoding: ValueEncoding;
     versionstamp: Uint8Array;
   }
 }
 
-export type Type = $.datapath.KvEntry;
+export type Type = $.com.deno.kv.datapath.KvEntry;
 
-export function getDefaultValue(): $.datapath.KvEntry {
+export function getDefaultValue(): $.com.deno.kv.datapath.KvEntry {
   return {
     key: new Uint8Array(),
     value: new Uint8Array(),
@@ -46,14 +46,14 @@ export function getDefaultValue(): $.datapath.KvEntry {
   };
 }
 
-export function createValue(partialValue: Partial<$.datapath.KvEntry>): $.datapath.KvEntry {
+export function createValue(partialValue: Partial<$.com.deno.kv.datapath.KvEntry>): $.com.deno.kv.datapath.KvEntry {
   return {
     ...getDefaultValue(),
     ...partialValue,
   };
 }
 
-export function encodeJson(value: $.datapath.KvEntry): unknown {
+export function encodeJson(value: $.com.deno.kv.datapath.KvEntry): unknown {
   const result: any = {};
   if (value.key !== undefined) result.key = tsValueToJsonValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = tsValueToJsonValueFns.bytes(value.value);
@@ -62,16 +62,16 @@ export function encodeJson(value: $.datapath.KvEntry): unknown {
   return result;
 }
 
-export function decodeJson(value: any): $.datapath.KvEntry {
+export function decodeJson(value: any): $.com.deno.kv.datapath.KvEntry {
   const result = getDefaultValue();
   if (value.key !== undefined) result.key = jsonValueToTsValueFns.bytes(value.key);
   if (value.value !== undefined) result.value = jsonValueToTsValueFns.bytes(value.value);
-  if (value.encoding !== undefined) result.encoding = jsonValueToTsValueFns.enum(value.encoding) as KvValueEncoding;
+  if (value.encoding !== undefined) result.encoding = jsonValueToTsValueFns.enum(value.encoding) as ValueEncoding;
   if (value.versionstamp !== undefined) result.versionstamp = jsonValueToTsValueFns.bytes(value.versionstamp);
   return result;
 }
 
-export function encodeBinary(value: $.datapath.KvEntry): Uint8Array {
+export function encodeBinary(value: $.com.deno.kv.datapath.KvEntry): Uint8Array {
   const result: WireMessage = [];
   if (value.key !== undefined) {
     const tsValue = value.key;
@@ -100,7 +100,7 @@ export function encodeBinary(value: $.datapath.KvEntry): Uint8Array {
   return serialize(result);
 }
 
-export function decodeBinary(binary: Uint8Array): $.datapath.KvEntry {
+export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.KvEntry {
   const result = getDefaultValue();
   const wireMessage = deserialize(binary);
   const wireFields = new Map(wireMessage);

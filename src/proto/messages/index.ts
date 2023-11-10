@@ -1,6 +1,6 @@
 // @ts-nocheck
-import * as datapath from "./datapath/index.ts";
+import * as com from "./com/index.ts";
 
 export type {
-  datapath,
+  com,
 };

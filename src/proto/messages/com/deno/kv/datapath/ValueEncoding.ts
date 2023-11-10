@@ -1,13 +1,13 @@
 // @ts-nocheck
-export declare namespace $.datapath {
-  export type KvValueEncoding =
+export declare namespace $.com.deno.kv.datapath {
+  export type ValueEncoding =
     | "VE_UNSPECIFIED"
     | "VE_V8"
     | "VE_LE64"
     | "VE_BYTES";
 }
 
-export type Type = $.datapath.KvValueEncoding;
+export type Type = $.com.deno.kv.datapath.ValueEncoding;
 
 export const num2name = {
   0: "VE_UNSPECIFIED",

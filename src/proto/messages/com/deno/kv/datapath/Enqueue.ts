@@ -2,23 +2,23 @@
 import {
   tsValueToJsonValueFns,
   jsonValueToTsValueFns,
-} from "../../runtime/json/scalar.ts";
+} from "../../../../../runtime/json/scalar.ts";
 import {
   WireMessage,
-} from "../../runtime/wire/index.ts";
+} from "../../../../../runtime/wire/index.ts";
 import {
   default as serialize,
-} from "../../runtime/wire/serialize.ts";
+} from "../../../../../runtime/wire/serialize.ts";
 import {
   tsValueToWireValueFns,
   wireValueToTsValueFns,
   unpackFns,
-} from "../../runtime/wire/scalar.ts";
+} from "../../../../../runtime/wire/scalar.ts";
 import {
   default as deserialize,
-} from "../../runtime/wire/deserialize.ts";
+} from "../../../../../runtime/wire/deserialize.ts";
 
-export declare namespace $.datapath {
+export declare namespace $.com.deno.kv.datapath {
   export type Enqueue = {
     payload: Uint8Array;
     deadlineMs: string;
@@ -27,9 +27,9 @@ export declare namespace $.datapath {
   }
 }
 
-export type Type = $.datapath.Enqueue;
+export type Type = $.com.deno.kv.datapath.Enqueue;
 
-export function getDefaultValue(): $.datapath.Enqueue {
+export function getDefaultValue(): $.com.deno.kv.datapath.Enqueue {
   return {
     payload: new Uint8Array(),
     deadlineMs: "0",
@@ -38,14 +38,14 @@ export function getDefaultValue(): $.datapath.Enqueue {
   };
 }
 
-export function createValue(partialValue: Partial<$.datapath.Enqueue>): $.datapath.Enqueue {
+export function createValue(partialValue: Partial<$.com.deno.kv.datapath.Enqueue>): $.com.deno.kv.datapath.Enqueue {
   return {
     ...getDefaultValue(),
     ...partialValue,
   };
 }
 
-export function encodeJson(value: $.datapath.Enqueue): unknown {
+export function encodeJson(value: $.com.deno.kv.datapath.Enqueue): unknown {
   const result: any = {};
   if (value.payload !== undefined) result.payload = tsValueToJsonValueFns.bytes(value.payload);
   if (value.deadlineMs !== undefined) result.deadlineMs = tsValueToJsonValueFns.int64(value.deadlineMs);
@@ -54,7 +54,7 @@ export function encodeJson(value: $.datapath.Enqueue): unknown {
   return result;
 }
 
-export function decodeJson(value: any): $.datapath.Enqueue {
+export function decodeJson(value: any): $.com.deno.kv.datapath.Enqueue {
   const result = getDefaultValue();
   if (value.payload !== undefined) result.payload = jsonValueToTsValueFns.bytes(value.payload);
   if (value.deadlineMs !== undefined) result.deadlineMs = jsonValueToTsValueFns.int64(value.deadlineMs);
@@ -63,7 +63,7 @@ export function decodeJson(value: any): $.datapath.Enqueue {
   return result;
 }
 
-export function encodeBinary(value: $.datapath.Enqueue): Uint8Array {
+export function encodeBinary(value: $.com.deno.kv.datapath.Enqueue): Uint8Array {
   const result: WireMessage = [];
   if (value.payload !== undefined) {
     const tsValue = value.payload;
@@ -90,7 +90,7 @@ export function encodeBinary(value: $.datapath.Enqueue): Uint8Array {
   return serialize(result);
 }
 
-export function decodeBinary(binary: Uint8Array): $.datapath.Enqueue {
+export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.Enqueue {
   const result = getDefaultValue();
   const wireMessage = deserialize(binary);
   const wireFields = new Map(wireMessage);

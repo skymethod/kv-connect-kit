@@ -7,67 +7,68 @@ import {
 import {
   tsValueToJsonValueFns,
   jsonValueToTsValueFns,
-} from "../../runtime/json/scalar.ts";
+} from "../../../../../runtime/json/scalar.ts";
 import {
   WireMessage,
   WireType,
-} from "../../runtime/wire/index.ts";
+} from "../../../../../runtime/wire/index.ts";
 import {
   default as serialize,
-} from "../../runtime/wire/serialize.ts";
+} from "../../../../../runtime/wire/serialize.ts";
 import {
   default as Long,
-} from "../../runtime/Long.ts";
+} from "../../../../../runtime/Long.ts";
 import {
   tsValueToWireValueFns,
   wireValueToTsValueFns,
-} from "../../runtime/wire/scalar.ts";
+  unpackFns,
+} from "../../../../../runtime/wire/scalar.ts";
 import {
   default as deserialize,
-} from "../../runtime/wire/deserialize.ts";
+} from "../../../../../runtime/wire/deserialize.ts";
 
-export declare namespace $.datapath {
+export declare namespace $.com.deno.kv.datapath {
   export type AtomicWriteOutput = {
     status: AtomicWriteStatus;
     versionstamp: Uint8Array;
-    primaryIfWriteDisabled: string;
+    failedChecks: number[];
   }
 }
 
-export type Type = $.datapath.AtomicWriteOutput;
+export type Type = $.com.deno.kv.datapath.AtomicWriteOutput;
 
-export function getDefaultValue(): $.datapath.AtomicWriteOutput {
+export function getDefaultValue(): $.com.deno.kv.datapath.AtomicWriteOutput {
   return {
     status: "AW_UNSPECIFIED",
     versionstamp: new Uint8Array(),
-    primaryIfWriteDisabled: "",
+    failedChecks: [],
   };
 }
 
-export function createValue(partialValue: Partial<$.datapath.AtomicWriteOutput>): $.datapath.AtomicWriteOutput {
+export function createValue(partialValue: Partial<$.com.deno.kv.datapath.AtomicWriteOutput>): $.com.deno.kv.datapath.AtomicWriteOutput {
   return {
     ...getDefaultValue(),
     ...partialValue,
   };
 }
 
-export function encodeJson(value: $.datapath.AtomicWriteOutput): unknown {
+export function encodeJson(value: $.com.deno.kv.datapath.AtomicWriteOutput): unknown {
   const result: any = {};
   if (value.status !== undefined) result.status = tsValueToJsonValueFns.enum(value.status);
   if (value.versionstamp !== undefined) result.versionstamp = tsValueToJsonValueFns.bytes(value.versionstamp);
-  if (value.primaryIfWriteDisabled !== undefined) result.primaryIfWriteDisabled = tsValueToJsonValueFns.string(value.primaryIfWriteDisabled);
+  result.failedChecks = value.failedChecks.map(value => tsValueToJsonValueFns.uint32(value));
   return result;
 }
 
-export function decodeJson(value: any): $.datapath.AtomicWriteOutput {
+export function decodeJson(value: any): $.com.deno.kv.datapath.AtomicWriteOutput {
   const result = getDefaultValue();
   if (value.status !== undefined) result.status = jsonValueToTsValueFns.enum(value.status) as AtomicWriteStatus;
   if (value.versionstamp !== undefined) result.versionstamp = jsonValueToTsValueFns.bytes(value.versionstamp);
-  if (value.primaryIfWriteDisabled !== undefined) result.primaryIfWriteDisabled = jsonValueToTsValueFns.string(value.primaryIfWriteDisabled);
+  result.failedChecks = value.failedChecks?.map((value: any) => jsonValueToTsValueFns.uint32(value)) ?? [];
   return result;
 }
 
-export function encodeBinary(value: $.datapath.AtomicWriteOutput): Uint8Array {
+export function encodeBinary(value: $.com.deno.kv.datapath.AtomicWriteOutput): Uint8Array {
   const result: WireMessage = [];
   if (value.status !== undefined) {
     const tsValue = value.status;
@@ -81,16 +82,15 @@ export function encodeBinary(value: $.datapath.AtomicWriteOutput): Uint8Array {
       [2, tsValueToWireValueFns.bytes(tsValue)],
     );
   }
-  if (value.primaryIfWriteDisabled !== undefined) {
-    const tsValue = value.primaryIfWriteDisabled;
+  for (const tsValue of value.failedChecks) {
     result.push(
-      [3, tsValueToWireValueFns.string(tsValue)],
+      [4, tsValueToWireValueFns.uint32(tsValue)],
     );
   }
   return serialize(result);
 }
 
-export function decodeBinary(binary: Uint8Array): $.datapath.AtomicWriteOutput {
+export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.AtomicWriteOutput {
   const result = getDefaultValue();
   const wireMessage = deserialize(binary);
   const wireFields = new Map(wireMessage);
@@ -108,12 +108,11 @@ export function decodeBinary(binary: Uint8Array): $.datapath.AtomicWriteOutput {
     if (value === undefined) break field;
     result.versionstamp = value;
   }
-  field: {
-    const wireValue = wireFields.get(3);
-    if (wireValue === undefined) break field;
-    const value = wireValueToTsValueFns.string(wireValue);
-    if (value === undefined) break field;
-    result.primaryIfWriteDisabled = value;
+  collection: {
+    const wireValues = wireMessage.filter(([fieldNumber]) => fieldNumber === 4).map(([, wireValue]) => wireValue);
+    const value = Array.from(unpackFns.uint32(wireValues));
+    if (!value.length) break collection;
+    result.failedChecks = value as any;
   }
   return result;
 }
