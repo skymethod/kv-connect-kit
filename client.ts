@@ -9,6 +9,10 @@ import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/datapath/
 import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, KvCheck, KvMutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/datapath/index.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
+export * as SnapshotReadProto from './proto/messages/datapath/SnapshotRead.ts';
+export * as SnapshotReadOutputProto from './proto/messages/datapath/SnapshotReadOutput.ts';
+export * as AtomicWriteProto from './proto/messages/datapath/AtomicWrite.ts';
+export * as AtomicWriteOutputProto from './proto/messages/datapath/AtomicWriteOutput.ts';
 
 type Fetcher = typeof fetch;
 
