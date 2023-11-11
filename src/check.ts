@@ -1,4 +1,4 @@
-import { AssertionError } from 'https://deno.land/std@0.204.0/assert/assertion_error.ts';
+import { AssertionError } from 'https://deno.land/std@0.206.0/assert/assertion_error.ts';
 import { KvKey } from './kv_types.ts';
 
 export function isRecord(obj: unknown): obj is Record<string, unknown> {

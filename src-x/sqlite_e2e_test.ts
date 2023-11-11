@@ -1,4 +1,4 @@
-import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
+import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
 import { endToEnd } from '../src/e2e.ts';
 import { makeSqliteService } from './sqlite.ts';
 import { SqliteNativeDriver } from './sqlite_native_driver.ts';

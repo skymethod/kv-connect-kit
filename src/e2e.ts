@@ -1,12 +1,12 @@
 // deno-lint-ignore-file no-explicit-any
-import { assert } from 'https://deno.land/std@0.204.0/assert/assert.ts';
-import { assertEquals } from 'https://deno.land/std@0.204.0/assert/assert_equals.ts';
-import { assertExists } from 'https://deno.land/std@0.204.0/assert/assert_exists.ts';
-import { assertFalse } from 'https://deno.land/std@0.204.0/assert/assert_false.ts';
-import { assertMatch } from 'https://deno.land/std@0.204.0/assert/assert_match.ts';
-import { assertNotEquals } from 'https://deno.land/std@0.204.0/assert/assert_not_equals.ts';
-import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejects.ts';
-import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
+import { assert } from 'https://deno.land/std@0.206.0/assert/assert.ts';
+import { assertEquals } from 'https://deno.land/std@0.206.0/assert/assert_equals.ts';
+import { assertExists } from 'https://deno.land/std@0.206.0/assert/assert_exists.ts';
+import { assertFalse } from 'https://deno.land/std@0.206.0/assert/assert_false.ts';
+import { assertMatch } from 'https://deno.land/std@0.206.0/assert/assert_match.ts';
+import { assertNotEquals } from 'https://deno.land/std@0.206.0/assert/assert_not_equals.ts';
+import { assertRejects } from 'https://deno.land/std@0.206.0/assert/assert_rejects.ts';
+import { assertThrows } from 'https://deno.land/std@0.206.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
 import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
@@ -140,7 +140,10 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        await assertRejects(() => kv.atomic().sum([ 'a' ], 0n).commit());
+        if (!(type === 'deno' && pathType === 'remote') && path.includes('/localhost')) {
+            // https://github.com/denoland/denokv/issues/32
+            await assertRejects(() => kv.atomic().sum([ 'a' ], 0n).commit());
+        }
     }
 
     {
@@ -383,7 +386,7 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
             const kv = await service.openKv(path);
             const received: unknown[] = [];
             kv.listenQueue(v => { received.push(v); });
-            await sleep(50);
+            await sleep(type === 'deno' ? 100 : 50);
             assertEquals(received, [ 'later' ]);
 
             kv.close();

@@ -1,5 +1,6 @@
-import { chunk } from 'https://deno.land/std@0.204.0/collections/chunk.ts';
-import { parse as parseFlags } from 'https://deno.land/std@0.204.0/flags/mod.ts';
+import { chunk } from 'https://deno.land/std@0.206.0/collections/chunk.ts';
+import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
+import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.206.0/semver/mod.ts';
 import { makeNativeService, makeRemoteService } from './client.ts';
 import { endToEnd } from './e2e.ts';
 import { makeInMemoryService } from './in_memory.ts';
@@ -89,13 +90,12 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
     });
 }
 
-const localKvAccessToken = (await Deno.permissions.query({ name: 'env', variable: 'LOCAL_KV_ACCESS_TOKEN' })).state === 'granted' && Deno.env.get('LOCAL_KV_ACCESS_TOKEN');
 const localKvUrl = (await Deno.permissions.query({ name: 'env', variable: 'LOCAL_KV_URL' })).state === 'granted' && Deno.env.get('LOCAL_KV_URL');
 
-if (typeof localKvAccessToken === 'string' && localKvUrl) {
+if (typeof denoKvAccessToken === 'string' && localKvUrl) {
     Deno.test({
         only: false,
-        ignore: true, // TODO won't work pre 1.38
+        ignore: compareVersion(parseVersion(Deno.version.deno), parseVersion('1.38.0')) < 0,
         name: 'e2e-deno-localkv',
         fn: async () => {
             const path = localKvUrl;
@@ -114,7 +114,7 @@ if (typeof localKvAccessToken === 'string' && localKvUrl) {
         name: 'e2e-kck-localkv',
         fn: async () => {
             const path = localKvUrl;
-            const service = makeRemoteService({ accessToken: localKvAccessToken, debug, maxRetries: 0 });
+            const service = makeRemoteService({ accessToken: denoKvAccessToken, debug, maxRetries: 0 });
             await clear(service, path);
             try {
                 await endToEnd(service, { type: 'kck', path });

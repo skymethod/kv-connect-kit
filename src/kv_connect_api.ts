@@ -43,12 +43,10 @@ export async function fetchAtomicWrite(url: string, accessToken: string, databas
 async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array, fetcher: typeof fetch, maxRetries: number, version: KvConnectProtocolVersion): Promise<Uint8Array> {
     const headers = { authorization: `Bearer ${accessToken}`, ...(version === 1 ? { 'x-transaction-domain-id': databaseId } : { 'x-denokv-version': '2', 'x-denokv-database-id': databaseId }) };
     return await executeWithRetries('fetchProtobuf', async () => {
-        console.log(url);
         const res = await fetcher(url, { method: 'POST', body, headers });
         if (res.status !== 200) throw new (res.status >= 500 && res.status < 600 ? RetryableError : Error)(`Unexpected response status: ${res.status} ${await res.text()}`);
         const contentType = res.headers.get('content-type') ?? undefined;
-        const expectedContentType = new URL(url).hostname === 'localhost' ? 'application/protobuf' : 'application/x-protobuf'; // TODO until fixed upstream
-        if (contentType !== expectedContentType) throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
+        if (![ 'application/x-protobuf', 'application/protobuf' ].includes(contentType ?? '')) throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`); // allow nonspec application/protobuf, was returned by denokv release 0.2.0
         return new Uint8Array(await res.arrayBuffer());
     }, { maxRetries });
 }
