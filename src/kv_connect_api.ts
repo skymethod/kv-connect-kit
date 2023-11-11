@@ -4,6 +4,7 @@ import { decodeBinary as decodeSnapshotReadOutput } from './proto/messages/com/d
 import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/com/deno/kv/datapath/AtomicWriteOutput.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { isDateTime, isRecord } from './check.ts';
+import { RetryableError, executeWithRetries } from './sleep.ts';
 
 // VERSION 1
 // https://github.com/denoland/deno/tree/092555c611ebab87ad570b4dcb73d54288dccdd9/ext/kv#kv-connect
@@ -17,34 +18,39 @@ import { isDateTime, isRecord } from './check.ts';
 
 export type KvConnectProtocolVersion = 1 | 2;
 
-export async function fetchDatabaseMetadata(url: string, accessToken: string, fetcher: typeof fetch = fetch, supportedVersions: KvConnectProtocolVersion[]): Promise<{ metadata: DatabaseMetadata, responseUrl: string }> {
-    const res = await fetcher(url, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ supportedVersions }) });
-    if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
-    const contentType = res.headers.get('content-type') ?? undefined;
-    if (contentType !== 'application/json') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
-    const metadata = await res.json();
-    if (!isDatabaseMetadata(metadata)) throw new Error(`Bad DatabaseMetadata: ${JSON.stringify(metadata)}`);
-    return { metadata, responseUrl: res.url };
+export async function fetchDatabaseMetadata(url: string, accessToken: string, fetcher: typeof fetch, maxRetries: number, supportedVersions: KvConnectProtocolVersion[]): Promise<{ metadata: DatabaseMetadata, responseUrl: string }> {
+    return await executeWithRetries('fetchDatabaseMetadata', async () => {
+        const res = await fetcher(url, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ supportedVersions }) });
+        if (res.status !== 200) throw new (res.status >= 500 && res.status < 600 ? RetryableError : Error)(`Unexpected response status: ${res.status} ${await res.text()}`);
+        const contentType = res.headers.get('content-type') ?? undefined;
+        if (contentType !== 'application/json') throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
+        const metadata = await res.json();
+        if (!isDatabaseMetadata(metadata)) throw new Error(`Bad DatabaseMetadata: ${JSON.stringify(metadata)}`);
+        return { metadata, responseUrl: res.url };
+    }, { maxRetries });
 }
 
-export async function fetchSnapshotRead(url: string, accessToken: string, databaseId: string, req: SnapshotRead, fetcher: typeof fetch = fetch, version: KvConnectProtocolVersion): Promise<SnapshotReadOutput> {
-    return decodeSnapshotReadOutput(await fetchProtobuf(url, accessToken, databaseId, encodeSnapshotRead(req), fetcher, version));
+export async function fetchSnapshotRead(url: string, accessToken: string, databaseId: string, req: SnapshotRead, fetcher: typeof fetch, maxRetries: number, version: KvConnectProtocolVersion): Promise<SnapshotReadOutput> {
+    return decodeSnapshotReadOutput(await fetchProtobuf(url, accessToken, databaseId, encodeSnapshotRead(req), fetcher, maxRetries, version));
 }
 
-export async function fetchAtomicWrite(url: string, accessToken: string, databaseId: string, write: AtomicWrite, fetcher: typeof fetch = fetch, version: KvConnectProtocolVersion): Promise<AtomicWriteOutput> {
-    return decodeAtomicWriteOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeAtomicWrite(write), fetcher, version));
+export async function fetchAtomicWrite(url: string, accessToken: string, databaseId: string, write: AtomicWrite, fetcher: typeof fetch, maxRetries: number, version: KvConnectProtocolVersion): Promise<AtomicWriteOutput> {
+    return decodeAtomicWriteOutput(await fetchProtobuf(url, accessToken, databaseId,  encodeAtomicWrite(write), fetcher, maxRetries, version));
 }
 
 //
 
-async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array, fetcher: typeof fetch = fetch, version: KvConnectProtocolVersion): Promise<Uint8Array> {
-    const headers = { authorization: `Bearer ${accessToken}`, ...(version === 1 ? { 'x-transaction-domain-id': databaseId } : { 'x-denokv-version': '2', 'x-denokv-database-id': databaseId })  };
-    const res = await fetcher(url, { method: 'POST', body, headers });
-    if (res.status !== 200) throw new Error(`Unexpected response status: ${res.status} ${await res.text()}`);
-    const contentType = res.headers.get('content-type') ?? undefined;
-    const expectedContentType = new URL(url).hostname === 'localhost' ? 'application/protobuf' : 'application/x-protobuf'; // TODO until fixed upstream
-    if (contentType !== expectedContentType) throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
-    return new Uint8Array(await res.arrayBuffer());
+async function fetchProtobuf(url: string, accessToken: string, databaseId: string, body: Uint8Array, fetcher: typeof fetch, maxRetries: number, version: KvConnectProtocolVersion): Promise<Uint8Array> {
+    const headers = { authorization: `Bearer ${accessToken}`, ...(version === 1 ? { 'x-transaction-domain-id': databaseId } : { 'x-denokv-version': '2', 'x-denokv-database-id': databaseId }) };
+    return await executeWithRetries('fetchProtobuf', async () => {
+        console.log(url);
+        const res = await fetcher(url, { method: 'POST', body, headers });
+        if (res.status !== 200) throw new (res.status >= 500 && res.status < 600 ? RetryableError : Error)(`Unexpected response status: ${res.status} ${await res.text()}`);
+        const contentType = res.headers.get('content-type') ?? undefined;
+        const expectedContentType = new URL(url).hostname === 'localhost' ? 'application/protobuf' : 'application/x-protobuf'; // TODO until fixed upstream
+        if (contentType !== expectedContentType) throw new Error(`Unexpected response content-type: ${contentType} ${await res.text()}`);
+        return new Uint8Array(await res.arrayBuffer());
+    }, { maxRetries });
 }
 
 function isValidEndpointUrl(url: string): boolean {

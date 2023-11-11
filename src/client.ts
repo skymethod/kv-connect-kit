@@ -44,6 +44,9 @@ export interface RemoteServiceOptions {
      */
     readonly fetcher?: Fetcher;
 
+    /** Max number of times to attempt to retry certain fetch errors (like 5xx) */
+    readonly maxRetries?: number;
+
     /** Limit to specific KV Connect protocol versions */
     readonly supportedVersions?: KvConnectProtocolVersion[];
 }
@@ -125,11 +128,12 @@ function resolveEndpointUrl(url: string, responseUrl: string): string {
     return u.pathname === '/' ? str.substring(0, str.length - 1) : str;
 }
 
-async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug: boolean, fetcher: Fetcher, supportedVersions: KvConnectProtocolVersion[]): Promise<DatabaseMetadata> {
+async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug: boolean, fetcher: Fetcher, maxRetries: number, supportedVersions: KvConnectProtocolVersion[]): Promise<DatabaseMetadata> {
     if (debug) console.log(`fetchNewDatabaseMetadata: Fetching ${url}...`);
-    const { metadata, responseUrl } = await fetchDatabaseMetadata(url, accessToken, fetcher, supportedVersions);
+    const { metadata, responseUrl } = await fetchDatabaseMetadata(url, accessToken, fetcher, maxRetries, supportedVersions);
     const { version, endpoints, token } = metadata;
     if (version !== 1 && version !== 2 || !supportedVersions.includes(version)) throw new Error(`Unsupported version: ${version}`);
+    if (debug) console.log(`fetchNewDatabaseMetadata: Using protocol version ${version}`);
     if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
     if (endpoints.length === 0) throw new Error(`No endpoints`);
     const expiresMillis = computeExpiresInMillis(metadata);
@@ -170,30 +174,32 @@ class RemoteKv extends BaseKv {
     private readonly encodeV8: EncodeV8;
     private readonly decodeV8: DecodeV8;
     private readonly fetcher: Fetcher;
+    private readonly maxRetries: number;
     private readonly supportedVersions: KvConnectProtocolVersion[];
 
     private metadata: DatabaseMetadata;
 
-    private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, supportedVersions: KvConnectProtocolVersion[], metadata: DatabaseMetadata) {
+    private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, maxRetries: number, supportedVersions: KvConnectProtocolVersion[], metadata: DatabaseMetadata) {
         super({ debug });
         this.url = url;
         this.accessToken = accessToken;
         this.encodeV8 = encodeV8;
         this.decodeV8 = decodeV8;
         this.fetcher = fetcher;
+        this.maxRetries = maxRetries;
         this.supportedVersions = supportedVersions;
         this.metadata = metadata;
     }
 
     static async of(url: string | undefined, opts: RemoteServiceOptions) {
-        const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, supportedVersions = [ 1, 2 ] } = opts;
+        const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, maxRetries = 10, supportedVersions = [ 1, 2 ] } = opts;
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
-        const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, supportedVersions);
+        const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
         const decodeV8: DecodeV8 = opts.decodeV8 ?? (v => _decodeV8(v, { wrapUnknownValues }));
 
-        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, fetcher, supportedVersions, metadata);
+        return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, fetcher, maxRetries, supportedVersions, metadata);
     }
 
     protected async get_<T = unknown>(key: KvKey, consistency?: KvConsistencyLevel): Promise<KvEntryMaybe<T>> {
@@ -305,34 +311,50 @@ class RemoteKv extends BaseKv {
     //
 
     private async locateEndpointUrl(consistency: KvConsistencyLevel): Promise<string> {
-        const { url, accessToken, debug, fetcher, supportedVersions } = this;
+        const { url, accessToken, debug, fetcher, maxRetries, supportedVersions } = this;
         if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
-            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, supportedVersions);
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         }
         const { metadata } = this;
         const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
         const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
         const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
         if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
-        return endpoint.url;
+        return endpoint.url; // guaranteed not to end in "/"
     }
 
     private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
-        const { metadata, debug, fetcher } = this;
-        const endpointUrl = await this.locateEndpointUrl(consistency);
-        const snapshotReadUrl = `${endpointUrl}/snapshot_read`;
-        const accessToken = metadata.token;
-        if (debug) console.log(`fetchSnapshotRead: ${snapshotReadToString(req)}`);
-        return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher, metadata.version);
+        const { url, accessToken, metadata, debug, fetcher, maxRetries, supportedVersions } = this;
+        const read = async () => {
+            const endpointUrl = await this.locateEndpointUrl(consistency);
+            const snapshotReadUrl = `${endpointUrl}/snapshot_read`;
+            const accessToken = metadata.token;
+            if (debug) console.log(`snapshotRead: ${snapshotReadToString(req)}`);
+            return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
+        }
+        const responseCheck = (res: SnapshotReadOutput) => !(this.metadata.version > 1 && (res.readDisabled || consistency === 'strong' && !res.readIsStronglyConsistent));
+        const res = await read();
+        if (!responseCheck(res)) {
+            if (debug) if (debug) console.log(`snapshotRead: response checks failed, refresh metadata and retry`);
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
+            const res = await read();
+            if (!responseCheck(res)) {
+                const { readDisabled, readIsStronglyConsistent } = res;
+                throw new Error(`snapshotRead: response checks failed after retry: ${JSON.stringify({ readDisabled, readIsStronglyConsistent })}`);
+            }
+            return res;
+        } else {
+            return res;
+        }
     }
 
     private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
-        const { metadata, debug, fetcher } = this;
+        const { metadata, debug, fetcher, maxRetries } = this;
         const endpointUrl = await this.locateEndpointUrl('strong');
         const atomicWriteUrl = `${endpointUrl}/atomic_write`;
         const accessToken = metadata.token;
         if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
-        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher, metadata.version);
+        return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
     }
     
 }

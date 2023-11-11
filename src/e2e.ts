@@ -9,6 +9,7 @@ import { assertRejects } from 'https://deno.land/std@0.204.0/assert/assert_rejec
 import { assertThrows } from 'https://deno.land/std@0.204.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
 import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
+import { sleep } from './sleep.ts';
 
 export async function endToEnd(service: KvService, { type, path }: { type: 'deno' | 'kck', path: string }) {
 
@@ -391,10 +392,6 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
 }
 
 //
-
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 async function toArray<T>(iter: AsyncIterableIterator<T>): Promise<T[]> {
     const rt: T[] = [];

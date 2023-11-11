@@ -75,6 +75,7 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
 
     Deno.test({
         name: 'e2e-kck-remote',
+        only: false,
         fn: async () => {
             const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
             const service = makeRemoteService({ accessToken: denoKvAccessToken, debug });
@@ -113,7 +114,7 @@ if (typeof localKvAccessToken === 'string' && localKvUrl) {
         name: 'e2e-kck-localkv',
         fn: async () => {
             const path = localKvUrl;
-            const service = makeRemoteService({ accessToken: localKvAccessToken, debug });
+            const service = makeRemoteService({ accessToken: localKvAccessToken, debug, maxRetries: 0 });
             await clear(service, path);
             try {
                 await endToEnd(service, { type: 'kck', path });
