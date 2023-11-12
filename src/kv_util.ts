@@ -266,6 +266,10 @@ export abstract class BaseKv implements Kv {
         this.close_();
     }
 
+    [Symbol.dispose](): void {
+        this.close();
+    }
+
     protected abstract get_<T = unknown>(key: KvKey, consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<T>>;
     protected abstract getMany_(keys: readonly KvKey[], consistency: KvConsistencyLevel | undefined): Promise<KvEntryMaybe<unknown>[]>;
     protected abstract listStream<T>(outCursor: CursorHolder, selector: KvListSelector, opts: KvListOptions): AsyncGenerator<KvEntry<T>>;

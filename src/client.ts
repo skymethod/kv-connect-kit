@@ -9,10 +9,12 @@ import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/
 import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvCheckMessage, Mutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 export { UnknownV8 } from './v8.ts';
+// for npm
 export * as SnapshotReadProto from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
 export * as SnapshotReadOutputProto from './proto/messages/com/deno/kv/datapath/SnapshotReadOutput.ts';
 export * as AtomicWriteProto from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
 export * as AtomicWriteOutputProto from './proto/messages/com/deno/kv/datapath/AtomicWriteOutput.ts';
+export { packKey, unpackKey } from './kv_key.ts';
 
 type Fetcher = typeof fetch;
 

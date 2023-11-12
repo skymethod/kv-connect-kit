@@ -227,6 +227,8 @@ export interface Kv {
      * operations immediately.
      */
     close(): void;
+
+    [Symbol.dispose](): void;
 }
 
 /** **UNSTABLE**: New API, yet to be vetted.
