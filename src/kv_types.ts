@@ -1,3 +1,6 @@
+// deno-lint-ignore no-explicit-any
+(Symbol as any).dispose ??= Symbol('Symbol.dispose'); // polyfill if needed
+
 export interface KvService {
     /** Open a new {@linkcode Deno.Kv} connection to persist data.
      *

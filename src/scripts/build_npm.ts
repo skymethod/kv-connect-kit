@@ -12,9 +12,18 @@ await build({
         // none!
     },
     compilerOptions: {
-        // let's try to support Node 14+
-        lib: [ 'ES2020', 'DOM','DOM.Iterable' ],
+        // let's try to support Node 18+
+        lib: [ 'ES2020', 'DOM', 'DOM.Iterable' ],
         target: 'ES2020',
+    },
+    filterDiagnostic: v => {
+        const { code, category, file, messageText } = v;
+        const txt = typeof messageText === 'string' ? messageText : messageText.messageText;
+        // Symbole.dispose is too new for dnt type-checking: https://github.com/denoland/dnt/issues/345
+        if (code === 1169 && file?.fileName.endsWith('/kv_types.ts') && txt.includes('unique symbol')) return false;
+        if (code === 2339 && /\/kv_(types|util)\.ts$/.test(file?.fileName ?? '') && txt.includes(`Property 'dispose' does not exist on type 'SymbolConstructor'`)) return false;
+        console.log(JSON.stringify({ code, category, file: file?.fileName, messageText }, undefined, 2));
+        return true;
     },
     package: {
         // package.json properties
