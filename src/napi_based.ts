@@ -1,3 +1,4 @@
+import { isRecord } from './check.ts';
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
 import { KvConsistencyLevel, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
@@ -31,6 +32,15 @@ export interface NapiInterface {
     close(db: number): void;
     snapshotRead(dbId: number, snapshotReadBytes: Uint8Array): Promise<Uint8Array>;
     atomicWrite(dbId: number, atomicWriteBytes: Uint8Array): Promise<Uint8Array>;
+}
+
+export function isNapiInterface(obj: unknown): obj is NapiInterface {
+    return isRecord(obj) 
+        && typeof obj.open === 'function'
+        && typeof obj.close === 'function'
+        && typeof obj.snapshotRead === 'function'
+        && typeof obj.atomicWrite === 'function'
+        ;
 }
 
 //

@@ -128,7 +128,7 @@ class InMemoryKv extends BaseKv {
             if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new Error(`Bad 'versionstamp': ${versionstamp}`);
             const existing = rows.find(keyRow(packKey(key)));
             if (versionstamp === null && existing) return { ok: false };
-            if (typeof versionstamp === 'string' && existing?.at(2) !== versionstamp) return { ok: false };
+            if (typeof versionstamp === 'string' && (existing ?? [])[2] !== versionstamp) return { ok: false };
         }
         let minExpires: number | undefined;
         let minEnqueued: number | undefined;
@@ -230,7 +230,7 @@ class InMemoryKv extends BaseKv {
         const time = Date.now();
         const candidateIds = [...queue.values()].filter(v => v.available <= time && !v.locked).map(v => v.id);
         if (candidateIds.length === 0) {
-            const nextAvailableItem = [...queue.values()].filter(v => !v.locked).sort((a, b) => a.available - b.available).at(0);
+            const nextAvailableItem = [...queue.values()].filter(v => !v.locked).sort((a, b) => a.available - b.available)[0];
             if (nextAvailableItem) {
                 const nextAvailableIn = nextAvailableItem.available - Date.now();
                 if (debug) console.log(`runWorker: no work (nextAvailableIn=${nextAvailableIn}ms)`);
