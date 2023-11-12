@@ -5,6 +5,7 @@ import { decodeBinary as decodeAtomicWriteOutput } from './proto/messages/com/de
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { isDateTime, isRecord } from './check.ts';
 import { RetryableError, executeWithRetries } from './sleep.ts';
+export { encodeAtomicWrite, encodeSnapshotRead, decodeSnapshotReadOutput, decodeAtomicWriteOutput };
 
 // VERSION 1
 // https://github.com/denoland/deno/tree/092555c611ebab87ad570b4dcb73d54288dccdd9/ext/kv#kv-connect

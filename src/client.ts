@@ -1,20 +1,12 @@
-import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
-import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
+import { KvConsistencyLevel, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
+import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvCheckMessage, Mutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { ProtoBasedKv } from './proto_based.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
-export { UnknownV8 } from './v8.ts';
-// for npm
-export * as SnapshotReadProto from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
-export * as SnapshotReadOutputProto from './proto/messages/com/deno/kv/datapath/SnapshotReadOutput.ts';
-export * as AtomicWriteProto from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
-export * as AtomicWriteOutputProto from './proto/messages/com/deno/kv/datapath/AtomicWriteOutput.ts';
-export { packKey, unpackKey } from './kv_key.ts';
 
 type Fetcher = typeof fetch;
 
@@ -64,65 +56,7 @@ export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     }
 }
 
-/**
- * Creates a new KvService instance that can be used to access Deno's native implementation (only works in the Deno runtime!)
- * 
- * Requires the --unstable flag to `deno run` and any applicable --allow-read/allow-write/allow-net flags
- */
-export function makeNativeService(): KvService {
-    if ('Deno' in globalThis) {
-        // deno-lint-ignore no-explicit-any
-        const { openKv, KvU64 } = (globalThis as any).Deno;
-        if (typeof openKv === 'function' && typeof KvU64 === 'function') {
-            return {
-                // deno-lint-ignore no-explicit-any
-                openKv: openKv as any,
-                newKvU64: value => new KvU64(value),
-                isKvU64: (obj: unknown): obj is KvU64 => obj instanceof KvU64,
-            }
-        }
-    }
-    throw new Error(`Global 'Deno.openKv' or 'Deno.KvU64' not found`);
-}
-
 //
-
-const emptyVersionstamp = new Uint8Array(10);
-
-function computeReadRangeForKey(packedKey: Uint8Array): ReadRange {
-    return {
-        start: packedKey,
-        end: new Uint8Array([ 0xff ]),
-        limit: 1,
-        reverse: false,
-    }
-}
-
-function computeKvCheckMessage({ key, versionstamp }: AtomicCheck): KvCheckMessage {
-    return {
-        key: packKey(key),
-        versionstamp: (versionstamp === null || versionstamp === undefined) ? emptyVersionstamp : decodeHex(versionstamp),
-    }
-}
-
-function computeKvMutationMessage(mut: KvMutation, encodeV8: EncodeV8): KvMutationMessage {
-    const { key, type } = mut;
-    return {
-        key: packKey(key),
-        mutationType: type === 'delete' ? 'M_DELETE' : type === 'max' ? 'M_MAX' : type === 'min' ? 'M_MIN' : type == 'set' ? 'M_SET' : type === 'sum' ? 'M_SUM' : 'M_UNSPECIFIED',
-        value: mut.type === 'delete' ? undefined : packKvValue(mut.value, encodeV8),
-        expireAtMs: mut.type === 'set' && typeof mut.expireIn === 'number' ? (Date.now() + mut.expireIn).toString() : '0',
-    }
-}
-
-function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, keysIfUndelivered = [] }: { delay?: number, keysIfUndelivered?: KvKey[] } = {}): EnqueueMessage {
-    return {
-        backoffSchedule: [ 100, 200, 400, 800 ],
-        deadlineMs: `${Date.now() + delay}`,
-        kvKeysIfUndelivered: keysIfUndelivered.map(packKey),
-        payload: encodeV8(value),
-    }
-}
 
 function resolveEndpointUrl(url: string, responseUrl: string): string {
     const u = new URL(url, responseUrl);
@@ -169,12 +103,10 @@ function atomicWriteToString(req: AtomicWrite): string {
 
 //
 
-class RemoteKv extends BaseKv {
+class RemoteKv extends ProtoBasedKv {
 
     private readonly url: string;
     private readonly accessToken: string;
-    private readonly encodeV8: EncodeV8;
-    private readonly decodeV8: DecodeV8;
     private readonly fetcher: Fetcher;
     private readonly maxRetries: number;
     private readonly supportedVersions: KvConnectProtocolVersion[];
@@ -182,11 +114,9 @@ class RemoteKv extends BaseKv {
     private metadata: DatabaseMetadata;
 
     private constructor(url: string, accessToken: string, debug: boolean, encodeV8: EncodeV8, decodeV8: DecodeV8, fetcher: Fetcher, maxRetries: number, supportedVersions: KvConnectProtocolVersion[], metadata: DatabaseMetadata) {
-        super({ debug });
+        super(debug, decodeV8, encodeV8);
         this.url = url;
         this.accessToken = accessToken;
-        this.encodeV8 = encodeV8;
-        this.decodeV8 = decodeV8;
         this.fetcher = fetcher;
         this.maxRetries = maxRetries;
         this.supportedVersions = supportedVersions;
@@ -204,128 +134,15 @@ class RemoteKv extends BaseKv {
         return new RemoteKv(url, accessToken, debug, encodeV8, decodeV8, fetcher, maxRetries, supportedVersions, metadata);
     }
 
-    protected async get_<T = unknown>(key: KvKey, consistency?: KvConsistencyLevel): Promise<KvEntryMaybe<T>> {
-        const { decodeV8 } = this;
-        const packedKey = packKey(key);
-        const req: SnapshotRead = {
-            ranges: [ computeReadRangeForKey(packedKey) ]
-        }
-        const res = await this.snapshotRead(req, consistency);
-        for (const range of res.ranges) {
-            for (const item of range.values) {
-                if (equalBytes(item.key, packedKey)) return { key, value: readValue(item.value, item.encoding, decodeV8) as T, versionstamp: encodeHex(item.versionstamp) };
-            }
-        }
-        return { key, value: null, versionstamp: null };
-    }
-
-    protected async getMany_(keys: readonly KvKey[], consistency?: KvConsistencyLevel): Promise<KvEntryMaybe<unknown>[]> {
-        const { decodeV8 } = this;
-        const packedKeys = keys.map(packKey);
-        const packedKeysHex = packedKeys.map(encodeHex);
-        const req: SnapshotRead = {
-            ranges: packedKeys.map(computeReadRangeForKey)
-        }
-        const res = await this.snapshotRead(req, consistency);
-        const rowMap = new Map<string, { key: KvKey, value: unknown, versionstamp: string }>();
-        for (const range of res.ranges) {
-            for (const { key, value, encoding, versionstamp } of range.values) {
-                rowMap.set(encodeHex(key), { key: unpackKey(key), value: readValue(value, encoding, decodeV8), versionstamp: encodeHex(versionstamp) })
-            }
-        }
-        return keys.map((key, i) => {
-            const row = rowMap.get(packedKeysHex[i]);
-            return row ? { key, value: row.value, versionstamp: row.versionstamp } : { key, value: null, versionstamp: null };
-        });
-    }
-
-    listenQueue_(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
+    protected listenQueue_(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
         throw new Error(`'listenQueue' is not possible over KV Connect`);
-    }
-
-    protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[]): Promise<KvCommitResult | KvCommitError> {
-        const write: AtomicWrite = {
-            checks: checks.map(computeKvCheckMessage),
-            mutations: mutations.map(v => computeKvMutationMessage(v, this.encodeV8)),
-            enqueues: enqueues.map(({ value, opts }) => computeEnqueueMessage(value, this.encodeV8, opts)),
-        };
-        const { status, versionstamp } = await this.atomicWrite(write);
-        if (status === 'AW_CHECK_FAILURE') return { ok: false };
-        if (status !== 'AW_SUCCESS') throw new Error(`commit failed with status: ${status}`);
-        return { ok: true, versionstamp: encodeHex(versionstamp) };
     }
 
     protected close_(): void {
         // no persistent resources yet
     }
 
-    protected async * listStream<T>(outCursor: CursorHolder, selector: KvListSelector, { batchSize, consistency, cursor: cursorOpt, limit, reverse = false }: KvListOptions = {}): AsyncGenerator<KvEntry<T>> {
-        const { decodeV8 } = this;
-        let yielded = 0;
-        if (typeof limit === 'number' && yielded >= limit) return;
-        const cursor = typeof cursorOpt === 'string' ? unpackCursor(cursorOpt) : undefined;
-        let lastYieldedKeyBytes = cursor?.lastYieldedKeyBytes;
-        let pass = 0;
-        const prefixBytes = 'prefix' in selector ? packKey(selector.prefix) : undefined;
-        while (true) {
-            pass++;
-            // console.log({ pass });
-            const req: SnapshotRead = { ranges: [] };
-            let start: Uint8Array | undefined;
-            let end: Uint8Array | undefined;
-            if ('prefix' in selector) {
-                start = 'start' in selector ? packKey(selector.start) : prefixBytes;
-                end = 'end' in selector ? packKey(selector.end) : new Uint8Array([ ...prefixBytes!, 0xff ]);
-            } else {
-                start = packKey(selector.start);
-                end = packKey(selector.end);
-            }
-            if (reverse) {
-                end = lastYieldedKeyBytes ?? end;
-            } else {
-                start = lastYieldedKeyBytes ?? start;
-            }
-           
-            if (start === undefined || end === undefined) throw new Error();
-            const batchLimit = Math.min(batchSize ?? 100, 500, limit ?? Number.MAX_SAFE_INTEGER) + (lastYieldedKeyBytes ? 1 : 0);
-            req.ranges.push({ start, end, limit: batchLimit, reverse });
-
-            const res = await this.snapshotRead(req, consistency);
-            let entries = 0;
-            for (const range of res.ranges) {
-                for (const entry of range.values) {
-                    if (entries++ === 0 && (lastYieldedKeyBytes && equalBytes(lastYieldedKeyBytes, entry.key) || prefixBytes && equalBytes(prefixBytes, entry.key))) continue;
-                    const key = unpackKey(entry.key);
-                    const value = readValue(entry.value, entry.encoding, decodeV8) as T;
-                    const versionstamp = encodeHex(entry.versionstamp);
-                    lastYieldedKeyBytes = entry.key;
-                    outCursor.set(packCursor({ lastYieldedKeyBytes })); // cursor needs to be set before yield
-                    yield { key, value, versionstamp };
-                    yielded++;
-                    // console.log({ yielded, entries, limit });
-                    if (typeof limit === 'number' && yielded >= limit) return;
-                }
-            }
-            if (entries < batchLimit) return;
-        }
-    }
-
-    //
-
-    private async locateEndpointUrl(consistency: KvConsistencyLevel): Promise<string> {
-        const { url, accessToken, debug, fetcher, maxRetries, supportedVersions } = this;
-        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
-            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
-        }
-        const { metadata } = this;
-        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
-        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
-        const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
-        if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
-        return endpoint.url; // guaranteed not to end in "/"
-    }
-
-    private async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
+    protected async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
         const { url, accessToken, metadata, debug, fetcher, maxRetries, supportedVersions } = this;
         const read = async () => {
             const endpointUrl = await this.locateEndpointUrl(consistency);
@@ -350,13 +167,28 @@ class RemoteKv extends BaseKv {
         }
     }
 
-    private async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
+    protected async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
         const { metadata, debug, fetcher, maxRetries } = this;
         const endpointUrl = await this.locateEndpointUrl('strong');
         const atomicWriteUrl = `${endpointUrl}/atomic_write`;
         const accessToken = metadata.token;
         if (debug) console.log(`fetchAtomicWrite: ${atomicWriteToString(req)}`);
         return await fetchAtomicWrite(atomicWriteUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
+    }
+
+    //
+
+    private async locateEndpointUrl(consistency: KvConsistencyLevel): Promise<string> {
+        const { url, accessToken, debug, fetcher, maxRetries, supportedVersions } = this;
+        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
+            this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
+        }
+        const { metadata } = this;
+        const firstStrong = metadata.endpoints.filter(v => v.consistency === 'strong')[0];
+        const firstNonStrong = metadata.endpoints.filter(v => v.consistency !== 'strong')[0];
+        const endpoint = consistency === 'strong' ? firstStrong : (firstNonStrong ?? firstStrong);
+        if (endpoint === undefined) throw new Error(`Unable to find endpoint for: ${consistency}`);
+        return endpoint.url; // guaranteed not to end in "/"
     }
     
 }

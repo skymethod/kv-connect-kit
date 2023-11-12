@@ -1,6 +1,6 @@
-import { makeNativeService } from './client.ts';
-import { makeInMemoryService } from './in_memory.ts';
-import { KvService } from './kv_types.ts';
+import { makeNativeService } from '../src/native.ts';
+import { makeInMemoryService } from '../src/in_memory.ts';
+import { KvService } from '../src/kv_types.ts';
 import { makeSqliteService } from './sqlite.ts';
 import { SqliteNativeDriver } from './sqlite_native_driver.ts';
 

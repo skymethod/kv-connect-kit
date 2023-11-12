@@ -5,7 +5,7 @@ const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
 await emptyDir(outDir);
 
 await build({
-    entryPoints: [ './src/client.ts' ],
+    entryPoints: [ './src/npm.ts' ],
     outDir,
     test: false,
     shims: {

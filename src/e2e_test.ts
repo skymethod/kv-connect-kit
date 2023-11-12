@@ -1,7 +1,8 @@
 import { chunk } from 'https://deno.land/std@0.206.0/collections/chunk.ts';
 import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
 import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.206.0/semver/mod.ts';
-import { makeNativeService, makeRemoteService } from './client.ts';
+import { makeRemoteService } from './client.ts';
+import { makeNativeService } from './native.ts';
 import { endToEnd } from './e2e.ts';
 import { makeInMemoryService } from './in_memory.ts';
 import { KvKey, KvService } from './kv_types.ts';
