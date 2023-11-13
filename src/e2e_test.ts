@@ -14,7 +14,7 @@ Deno.test({
     name: 'e2e-kck-in-memory',
     only: false,
     fn: async () => {
-        await endToEnd(makeInMemoryService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path: ':memory:' });
+        await endToEnd(makeInMemoryService({ debug, maxQueueAttempts: 1 }), { type: 'kck', subtype: 'in-memory', path: ':memory:' });
     }
 });
 
@@ -83,7 +83,7 @@ if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
             const service = makeRemoteService({ accessToken: denoKvAccessToken, debug });
             await clear(service, path);
             try {
-                await endToEnd(service, { type: 'kck', path });
+                await endToEnd(service, { type: 'kck', subtype: 'remote', path });
             } finally {
                 await clear(service, path);
             }
@@ -118,7 +118,7 @@ if (typeof denoKvAccessToken === 'string' && localKvUrl) {
             const service = makeRemoteService({ accessToken: denoKvAccessToken, debug, maxRetries: 0 });
             await clear(service, path);
             try {
-                await endToEnd(service, { type: 'kck', path });
+                await endToEnd(service, { type: 'kck', subtype: 'remote', path });
             } finally {
                 await clear(service, path);
             }

@@ -6,8 +6,8 @@ import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvC
 export { UnknownV8 } from './v8.ts';
 
 export abstract class ProtoBasedKv extends BaseKv {
-    private readonly decodeV8: DecodeV8;
-    private readonly encodeV8: EncodeV8;
+    protected readonly decodeV8: DecodeV8;
+    protected readonly encodeV8: EncodeV8;
 
     constructor(debug: boolean, decodeV8: DecodeV8, encodeV8: EncodeV8) {
         super({ debug });

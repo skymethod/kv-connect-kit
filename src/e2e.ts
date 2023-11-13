@@ -11,7 +11,7 @@ import { checkString } from './check.ts';
 import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
 
-export async function endToEnd(service: KvService, { type, path }: { type: 'deno' | 'kck', path: string }) {
+export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'kck', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
 
     const pathType = path === ':memory:' ? 'memory' : /^https?:\/\//.test(path) ? 'remote' : 'disk';
     const kv = await service.openKv(path);
@@ -200,7 +200,7 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type === 'kck' && pathType !== 'remote') { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
+        if (type === 'kck' && pathType !== 'remote' && subtype !== 'napi') { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
@@ -282,7 +282,10 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
         const delay = pathType === 'disk' ? 200 : 20;
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
-            records[v as string].received = Date.now();
+            if (typeof v !== 'string') throw new Error(`Expected string value, received: ${JSON.stringify(v)}`);
+            const record = records[v];
+            if (!record) throw new Error(`Unexpected callback value '${v}', expected: ${JSON.stringify([...Object.keys(records)])}`);
+            record.received = Date.now();
             if (v === 'q3') throw new Error();
         });
 
@@ -308,7 +311,7 @@ export async function endToEnd(service: KvService, { type, path }: { type: 'deno
         }
 
         await sleep(delay * 5 / 2);
-        assertEquals(Object.entries(records).toSorted((a, b) => a[1].received! - b[1].received!).map(v => v[0]), [ 'q1', 'q3', 'q2' ]);
+        assertEquals(toSorted(Object.entries(records), (a, b) => a[1].received! - b[1].received!).map(v => v[0]), [ 'q1', 'q3', 'q2' ]);
         assert((records.q1.received! - records.q1.sent) <= delay / 2);
         assert((records.q2.received! - records.q2.sent) >= delay);
         assert((records.q3.received! - records.q3.sent) <= delay / 2);
@@ -411,4 +414,9 @@ async function logAndRethrow<T>(fn: () => Promise<T>): Promise<T> {
         // console.error(e);
         throw e;
     }
+}
+
+function toSorted<T>(arr: T[], compareFn?: (a: T, b: T) => number): T[] { // avoid newer .toSorted to support older es environments
+    const rt = [ ...arr ];
+    return rt.sort(compareFn);
 }

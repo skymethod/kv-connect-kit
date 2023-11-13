@@ -1,11 +1,16 @@
 import { join } from 'https://deno.land/std@0.206.0/path/mod.ts';
-import { build, emptyDir } from 'https://deno.land/x/dnt@0.38.1/mod.ts';
+import { LibName, build, emptyDir } from 'https://deno.land/x/dnt@0.38.1/mod.ts';
+import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
+
+const flags = parseFlags(Deno.args);
+const tests = !!flags.tests;
+if (tests) console.log('including tests!');
 
 const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
 await emptyDir(outDir);
 
 await build({
-    entryPoints: [ './src/npm.ts' ],
+    entryPoints: [ './src/npm.ts', ...(tests ? [{ name: './tests', path: './src/e2e.ts' }] : [])  ],
     outDir,
     test: false,
     shims: {
@@ -13,7 +18,7 @@ await build({
     },
     compilerOptions: {
         // let's try to support Node 18+
-        lib: [ 'ES2020', 'DOM', 'DOM.Iterable' ],
+        lib: [ 'ES2020', 'DOM', 'DOM.Iterable', ...(tests ? [ 'ES2021.WeakRef' as LibName ] : []) ],
         target: 'ES2020',
     },
     filterDiagnostic: v => {

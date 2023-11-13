@@ -10,7 +10,7 @@ Deno.test({
     name: 'e2e-kck-wasm-memory',
     only: false,
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path: ':memory:' });
+        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', subtype: 'sqlite', path: ':memory:' });
     }
 });
 
@@ -18,7 +18,7 @@ Deno.test({
     name: 'e2e-kck-native-memory',
     only: false,
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', path: ':memory:' });
+        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', subtype: 'sqlite', path: ':memory:' });
     }
 });
 
@@ -28,7 +28,7 @@ Deno.test({
     fn: async () => {
         const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
         try {
-            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', path });
+            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1 }), { type: 'kck', subtype: 'sqlite', path });
         } finally {
             await Deno.remove(path);
         }
@@ -41,7 +41,7 @@ Deno.test({
     fn: async () => {
         const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
         try {
-            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', path });
+            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', subtype: 'sqlite', path });
         } finally {
             await Deno.remove(path);
         }
