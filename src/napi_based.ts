@@ -28,11 +28,12 @@ export function makeNapiBasedService(opts: NapiBasedServiceOptions): KvService {
 }
 
 export interface NapiInterface {
-    open(path: string): number;
-    close(db: number): void;
-    snapshotRead(dbId: number, snapshotReadBytes: Uint8Array): Promise<Uint8Array>;
-    atomicWrite(dbId: number, atomicWriteBytes: Uint8Array): Promise<Uint8Array>;
-    dequeueNextMessage(dbId: number): Promise<Uint8Array | undefined>;
+    open(path: string, debug: boolean): number;
+    close(db: number, debug: boolean): void;
+    snapshotRead(dbId: number, snapshotReadBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
+    atomicWrite(dbId: number, atomicWriteBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
+    dequeueNextMessage(dbId: number, debug: boolean): Promise<{ bytes: Uint8Array, messageId: number } | undefined>;
+    finishMessage(dbId: number, messageId: number, success: boolean, debug: boolean): Promise<void>;
 }
 
 export function isNapiInterface(obj: unknown): obj is NapiInterface {
@@ -60,34 +61,44 @@ class NapiBasedKv extends ProtoBasedKv {
     static of(url: string | undefined, opts: NapiBasedServiceOptions): NapiBasedKv {
         const { debug = false, napi, decodeV8 } = opts;
         if (typeof url !== 'string' || /^https?:\/\//i.test(url)) throw new Error(`Invalid path: ${url}`);
-        const dbId = napi.open(url);
+        const dbId = napi.open(url, debug);
         return new NapiBasedKv(debug, napi, dbId, decodeV8, encodeV8);
     }
 
     protected async listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
-        const { napi, dbId, decodeV8 } = this;
+        const { napi, dbId, decodeV8, debug } = this;
         while (true) {
-            const bytes = await napi.dequeueNextMessage(dbId);
-            if (bytes === undefined) return;
+            if (debug) console.log(`listenQueue_: before dequeueNextMessage`);
+            const result = await napi.dequeueNextMessage(dbId, debug);
+            if (result === undefined) return;
+            const { bytes, messageId } = result;
             const value = decodeV8(bytes);
-            await Promise.resolve(handler(value));
+            if (debug) console.log(`listenQueue_: after value ${value}`);
+
+            try {
+                await Promise.resolve(handler(value));
+                await napi.finishMessage(dbId, messageId, true, debug);
+            } catch (e) {
+                if (debug) console.log(`listenQueue_: handler failed ${e.stack || e}`);
+                await napi.finishMessage(dbId, messageId, false, debug);
+            }
         }
     }
 
     protected close_(): void {
-        const { napi, dbId } = this;
-        napi.close(dbId);
+        const { napi, dbId, debug } = this;
+        napi.close(dbId, debug);
     }
 
     protected async snapshotRead(req: SnapshotRead, _consistency?: KvConsistencyLevel): Promise<SnapshotReadOutput> {
-        const { napi, dbId } = this;
-        const res = await napi.snapshotRead(dbId, encodeSnapshotRead(req));
+        const { napi, dbId, debug } = this;
+        const res = await napi.snapshotRead(dbId, encodeSnapshotRead(req), debug);
         return decodeSnapshotReadOutput(res);
     }
 
     protected async atomicWrite(req: AtomicWrite): Promise<AtomicWriteOutput> {
-        const { napi, dbId } = this;
-        const res = await napi.atomicWrite(dbId, encodeAtomicWrite(req));
+        const { napi, dbId, debug } = this;
+        const res = await napi.atomicWrite(dbId, encodeAtomicWrite(req), debug);
         return decodeAtomicWriteOutput(res);
     }
 

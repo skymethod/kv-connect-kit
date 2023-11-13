@@ -14,6 +14,8 @@ import { sleep } from './sleep.ts';
 export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'kck', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
 
     const pathType = path === ':memory:' ? 'memory' : /^https?:\/\//.test(path) ? 'remote' : 'disk';
+    const napi = subtype === 'napi';
+
     const kv = await service.openKv(path);
 
     // basic get/set, trivial list, noop commit
@@ -200,7 +202,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type === 'kck' && pathType !== 'remote' && subtype !== 'napi') { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck
+        if (type === 'kck' && pathType !== 'remote' && !napi) { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck, nor napi
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
@@ -278,8 +280,8 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     }
 
     // enqueue/listenQueue
-    if (type === 'kck' && pathType !== 'remote' && subtype !== 'napi') { // TODO remove once implemented
-        const delay = pathType === 'disk' ? 200 : 20;
+    if (type === 'kck' && pathType !== 'remote') {
+        const delay = napi ? 1000 : pathType === 'disk' ? 200 : 20;
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
             if (typeof v !== 'string') throw new Error(`Expected string value, received: ${JSON.stringify(v)}`);
@@ -311,10 +313,10 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         }
 
         await sleep(delay * 5 / 2);
-        assertEquals(toSorted(Object.entries(records), (a, b) => a[1].received! - b[1].received!).map(v => v[0]), [ 'q1', 'q3', 'q2' ]);
+        assertEquals(toSorted(Object.entries(records), (a, b) => a[1].received! - b[1].received!).map(v => v[0]), napi ? [ 'q1', 'q2', 'q3' ] : [ 'q1', 'q3', 'q2' ]);
         assert((records.q1.received! - records.q1.sent) <= delay / 2);
         assert((records.q2.received! - records.q2.sent) >= delay);
-        assert((records.q3.received! - records.q3.sent) <= delay / 2);
+        if (!napi) assert((records.q3.received! - records.q3.sent) <= delay / 2);
         assertEquals((await kv.get([ 'q3' ])).value, 'q3');
     }
 
@@ -389,7 +391,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
             const kv = await service.openKv(path);
             const received: unknown[] = [];
             kv.listenQueue(v => { received.push(v); });
-            await sleep(type === 'deno' ? 100 : 50);
+            await sleep(napi ? 1000 : type === 'deno' ? 100 : 50);
             assertEquals(received, [ 'later' ]);
 
             kv.close();
