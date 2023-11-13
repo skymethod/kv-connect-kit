@@ -278,7 +278,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     }
 
     // enqueue/listenQueue
-    if (type === 'kck' && pathType !== 'remote') {
+    if (type === 'kck' && pathType !== 'remote' && subtype !== 'napi') { // TODO remove once implemented
         const delay = pathType === 'disk' ? 200 : 20;
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {

@@ -32,7 +32,7 @@ export interface NapiInterface {
     close(db: number): void;
     snapshotRead(dbId: number, snapshotReadBytes: Uint8Array): Promise<Uint8Array>;
     atomicWrite(dbId: number, atomicWriteBytes: Uint8Array): Promise<Uint8Array>;
-    listenQueue(dbId: number, func: (...args: unknown[]) => unknown): Promise<void>;
+    dequeueNextMessage(dbId: number): Promise<Uint8Array | undefined>;
 }
 
 export function isNapiInterface(obj: unknown): obj is NapiInterface {
@@ -64,12 +64,14 @@ class NapiBasedKv extends ProtoBasedKv {
         return new NapiBasedKv(debug, napi, dbId, decodeV8, encodeV8);
     }
 
-    protected listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
-        const { napi, dbId } = this;
-        return napi.listenQueue(dbId, async (...args) => {
-            console.log(`in callback! args=${JSON.stringify(args)} Uint8Array=${args[1] instanceof Uint8Array}`);
-            await handler('TODO');
-        });
+    protected async listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void> {
+        const { napi, dbId, decodeV8 } = this;
+        while (true) {
+            const bytes = await napi.dequeueNextMessage(dbId);
+            if (bytes === undefined) return;
+            const value = decodeV8(bytes);
+            await Promise.resolve(handler(value));
+        }
     }
 
     protected close_(): void {
