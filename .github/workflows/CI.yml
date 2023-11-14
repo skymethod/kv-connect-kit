@@ -62,22 +62,23 @@ jobs:
           #     export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
           #     yarn build --target aarch64-apple-darwin
           #     strip -x *.node
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: |-
-              set -e &&
-              apt-get -y install protobuf-compiler &&
-              yarn build --target aarch64-unknown-linux-gnu &&
-              aarch64-unknown-linux-gnu-strip *.node
           # - host: ubuntu-latest
-          #   target: armv7-unknown-linux-gnueabihf
-          #   setup: |
-          #     sudo apt-get update
-          #     sudo apt-get install gcc-arm-linux-gnueabihf -y
-          #   build: |
-          #     yarn build --target armv7-unknown-linux-gnueabihf
-          #     arm-linux-gnueabihf-strip *.node
+          #   target: aarch64-unknown-linux-gnu
+          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+          #   build: |-
+          #     set -e &&
+          #     apt-get -y install protobuf-compiler &&
+          #     yarn build --target aarch64-unknown-linux-gnu &&
+          #     aarch64-unknown-linux-gnu-strip *.node
+          - host: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            setup: |
+              sudo apt-get update
+              sudo apt-get install gcc-arm-linux-gnueabihf -y
+              sudo apt-get install protobuf-compiler -y
+            build: |
+              yarn build --target armv7-unknown-linux-gnueabihf
+              arm-linux-gnueabihf-strip *.node
           # - host: ubuntu-latest
           #   target: aarch64-linux-android
           #   build: |
@@ -320,49 +321,49 @@ jobs:
   #     - name: Test bindings
   #       run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-alpine yarn test
   #       working-directory: ./napi
-  test-linux-aarch64-gnu-binding:
-    name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
-    needs:
-      - build
-    strategy:
-      fail-fast: false
-      matrix:
-        node:
-          - '18'
-          - '20'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: bindings-aarch64-unknown-linux-gnu
-          path: ./napi
-      - name: List packages
-        run: ls -R .
-        shell: bash
-        working-directory: ./napi
-      - name: Install dependencies
-        run: |
-          yarn config set supportedArchitectures.cpu "arm64"
-          yarn config set supportedArchitectures.libc "glibc"
-          yarn install
-        working-directory: ./napi
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-        working-directory: ./napi
-      - name: Setup and run tests
-        uses: addnab/docker-run-action@v3
-        with:
-          image: node:${{ matrix.node }}-slim
-          options: '--platform linux/arm64 -v ${{ github.workspace }}/napi:/build -w /build'
-          run: |
-            set -e
-            yarn test
-            ls -la
+  # test-linux-aarch64-gnu-binding:
+  #   name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
+  #   needs:
+  #     - build
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       node:
+  #         - '18'
+  #         - '20'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: bindings-aarch64-unknown-linux-gnu
+  #         path: ./napi
+  #     - name: List packages
+  #       run: ls -R .
+  #       shell: bash
+  #       working-directory: ./napi
+  #     - name: Install dependencies
+  #       run: |
+  #         yarn config set supportedArchitectures.cpu "arm64"
+  #         yarn config set supportedArchitectures.libc "glibc"
+  #         yarn install
+  #       working-directory: ./napi
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+  #       with:
+  #         platforms: arm64
+  #     - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+  #       working-directory: ./napi
+  #     - name: Setup and run tests
+  #       uses: addnab/docker-run-action@v3
+  #       with:
+  #         image: node:${{ matrix.node }}-slim
+  #         options: '--platform linux/arm64 -v ${{ github.workspace }}/napi:/build -w /build'
+  #         run: |
+  #           set -e
+  #           yarn test
+  #           ls -la
   # test-linux-aarch64-musl-binding:
   #   name: Test bindings on aarch64-unknown-linux-musl - node@lts
   #   needs:
@@ -399,48 +400,48 @@ jobs:
   #         run: |
   #           set -e
   #           yarn test
-  # test-linux-arm-gnueabihf-binding:
-  #   name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
-  #   needs:
-  #     - build
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       node:
-  #         - '18'
-  #         - '20'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: bindings-armv7-unknown-linux-gnueabihf
-  #         path: .
-  #     - name: List packages
-  #       run: ls -R .
-  #       shell: bash
-  #       working-directory: ./napi
-  #     - name: Install dependencies
-  #       run: |
-  #         yarn config set supportedArchitectures.cpu "arm"
-  #         yarn install
-  #       working-directory: ./napi
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v3
-  #       with:
-  #         platforms: arm
-  #     - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-  #       working-directory: ./napi
-  #     - name: Setup and run tests
-  #       uses: addnab/docker-run-action@v3
-  #       with:
-  #         image: node:${{ matrix.node }}-bullseye-slim
-  #         options: '--platform linux/arm/v7 -v ${{ github.workspace }}:/build -w /build'
-  #         run: |
-  #           set -e
-  #           yarn test
-  #           ls -la
+  test-linux-arm-gnueabihf-binding:
+    name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - '18'
+          - '20'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-armv7-unknown-linux-gnueabihf
+          path: ./napi
+      - name: List packages
+        run: ls -R .
+        shell: bash
+        working-directory: ./napi
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.cpu "arm"
+          yarn install
+        working-directory: ./napi
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+        working-directory: ./napi
+      - name: Setup and run tests
+        uses: addnab/docker-run-action@v3
+        with:
+          image: node:${{ matrix.node }}-bullseye-slim
+          options: '--platform linux/arm/v7 -v ${{ github.workspace }}/napi:/build -w /build'
+          run: |
+            set -e
+            yarn test
+            ls -la
   # publish:
   #   name: Publish
   #   runs-on: ubuntu-latest
