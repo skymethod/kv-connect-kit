@@ -27,11 +27,11 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          # - host: macos-latest
-          #   target: x86_64-apple-darwin
-          #   build: |
-          #     yarn build
-          #     strip -x *.node
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: |
+              yarn build
+              strip -x *.node
           # - host: windows-latest
           #   build: yarn build
           #   target: x86_64-pc-windows-msvc
@@ -52,16 +52,16 @@ jobs:
           #   target: x86_64-unknown-linux-musl
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
           #   build: set -e && apk update && apk add --no-cache make protobuf-dev && yarn build && strip *.node
-          # - host: macos-latest
-          #   target: aarch64-apple-darwin
-          #   build: |
-          #     sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*;
-          #     export CC=$(xcrun -f clang);
-          #     export CXX=$(xcrun -f clang++);
-          #     SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
-          #     export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
-          #     yarn build --target aarch64-apple-darwin
-          #     strip -x *.node
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: |
+              sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*;
+              export CC=$(xcrun -f clang);
+              export CXX=$(xcrun -f clang++);
+              SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
+              export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
+              yarn build --target aarch64-apple-darwin
+              strip -x *.node
           # - host: ubuntu-latest
           #   target: aarch64-unknown-linux-gnu
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
@@ -89,15 +89,15 @@ jobs:
           #   build: |
           #     yarn build --target armv7-linux-androideabi
           #     ${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip *.node
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |-
-              set -e &&
-              apk update && apk add --no-cache make protobuf-dev &&
-              rustup target add aarch64-unknown-linux-musl &&
-              yarn build --target aarch64-unknown-linux-musl &&
-              /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
+          # - host: ubuntu-latest
+          #   target: aarch64-unknown-linux-musl
+          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+          #   build: |-
+          #     set -e &&
+          #     apk update && apk add --no-cache make protobuf-dev &&
+          #     rustup target add aarch64-unknown-linux-musl &&
+          #     yarn build --target aarch64-unknown-linux-musl &&
+          #     /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
           # - host: windows-latest
           #   target: aarch64-pc-windows-msvc
           #   build: yarn build --target aarch64-pc-windows-msvc
@@ -216,44 +216,45 @@ jobs:
   #         name: bindings-freebsd
   #         path: ${{ env.APP_NAME }}.*.node
   #         if-no-files-found: error
-  # test-macOS-windows-binding:
-  #   name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
-  #   needs:
-  #     - build
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       settings:
-  #         - host: windows-latest
-  #           target: x86_64-pc-windows-msvc
-  #         - host: macos-latest
-  #           target: x86_64-apple-darwin
-  #       node:
-  #         - '18'
-  #         - '20'
-  #   runs-on: ${{ matrix.settings.host }}
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Setup node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: ${{ matrix.node }}
-  #         cache: yarn
-  #     - name: Install dependencies
-  #       run: yarn install
-  #       working-directory: ./napi
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: bindings-${{ matrix.settings.target }}
-  #         path: .
-  #     - name: List packages
-  #       run: ls -R .
-  #       shell: bash
-  #       working-directory: ./napi
-  #     - name: Test bindings
-  #       run: yarn test
-  #       working-directory: ./napi
+  test-macOS-windows-binding:
+    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+          - host: macos-latest
+            target: x86_64-apple-darwin
+        node:
+          - '18'
+          - '20'
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+          cache-dependency-path: ./napi/yarn.lock
+      - name: Install dependencies
+        run: yarn install
+        working-directory: ./napi
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: ./napi
+      - name: List packages
+        run: ls -R .
+        shell: bash
+        working-directory: ./napi
+      - name: Test bindings
+        run: yarn test
+        working-directory: ./napi
   # test-linux-x64-gnu-binding:
   #   name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
   #   needs:
@@ -367,42 +368,42 @@ jobs:
   #           set -e
   #           yarn test
   #           ls -la
-  test-linux-aarch64-musl-binding:
-    name: Test bindings on aarch64-unknown-linux-musl - node@lts
-    needs:
-      - build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: bindings-aarch64-unknown-linux-musl
-          path: ./napi
-      - name: List packages
-        run: ls -R .
-        shell: bash
-        working-directory: ./napi
-      - name: Install dependencies
-        run: |
-          yarn config set supportedArchitectures.cpu "arm64"
-          yarn config set supportedArchitectures.libc "musl"
-          yarn install
-        working-directory: ./napi
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-        working-directory: ./napi
-      - name: Setup and run tests
-        uses: addnab/docker-run-action@v3
-        with:
-          image: node:lts-alpine
-          options: '--platform linux/arm64 -v ${{ github.workspace }}/napi:/build -w /build'
-          run: |
-            set -e
-            yarn test
+  # test-linux-aarch64-musl-binding:
+  #   name: Test bindings on aarch64-unknown-linux-musl - node@lts
+  #   needs:
+  #     - build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: bindings-aarch64-unknown-linux-musl
+  #         path: ./napi
+  #     - name: List packages
+  #       run: ls -R .
+  #       shell: bash
+  #       working-directory: ./napi
+  #     - name: Install dependencies
+  #       run: |
+  #         yarn config set supportedArchitectures.cpu "arm64"
+  #         yarn config set supportedArchitectures.libc "musl"
+  #         yarn install
+  #       working-directory: ./napi
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+  #       with:
+  #         platforms: arm64
+  #     - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+  #       working-directory: ./napi
+  #     - name: Setup and run tests
+  #       uses: addnab/docker-run-action@v3
+  #       with:
+  #         image: node:lts-alpine
+  #         options: '--platform linux/arm64 -v ${{ github.workspace }}/napi:/build -w /build'
+  #         run: |
+  #           set -e
+  #           yarn test
   # test-linux-arm-gnueabihf-binding:
   #   name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
   #   needs:
