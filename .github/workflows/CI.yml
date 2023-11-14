@@ -200,6 +200,7 @@ jobs:
           environment_variables: DEBUG RUSTUP_IO_THREADS
           shell: bash
           run: |
+            cd ./napi
             sudo pkg install -y -f curl node libnghttp2 npm protobuf
             sudo npm install -g yarn --ignore-scripts
             curl https://sh.rustup.rs -sSf --output rustup.sh
@@ -221,7 +222,6 @@ jobs:
             rm -rf node_modules
             rm -rf target
             rm -rf .yarn/cache
-          working-directory: ./napi
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
