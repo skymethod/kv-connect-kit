@@ -33,9 +33,9 @@ jobs:
           #     brew install protobuf
           #     yarn build
           #     strip -x *.node
-          - host: windows-latest
-            build: yarn build
-            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   build: yarn build
+          #   target: x86_64-pc-windows-msvc
           - host: windows-latest
             build: |
               yarn build --target i686-pc-windows-msvc
@@ -100,9 +100,9 @@ jobs:
           #     rustup target add aarch64-unknown-linux-musl &&
           #     yarn build --target aarch64-unknown-linux-musl &&
           #     /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            build: yarn build --target aarch64-pc-windows-msvc
+          # - host: windows-latest
+          #   target: aarch64-pc-windows-msvc
+          #   build: yarn build --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@18
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -153,6 +153,7 @@ jobs:
           node-version: 18
           cache: yarn
           architecture: x86
+          cache-dependency-path: ./napi/yarn.lock
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
