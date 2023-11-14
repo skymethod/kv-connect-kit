@@ -11,11 +11,11 @@ env:
       - '**'
     paths:
       - napi
-      - '!napi/**/*.md'
-      - '!napi/LICENSE'
-      - '!napi/**/*.gitignore'
-      - '!napi/.editorconfig'
-      - '!napi/docs/**'
+      # - '!napi/**/*.md'
+      # - '!napi/LICENSE'
+      # - '!napi/**/*.gitignore'
+      # - '!napi/.editorconfig'
+      # - '!napi/docs/**'
   pull_request: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
