@@ -1,8 +1,12 @@
 import test from 'ava'
 
-import { plus100 } from '../index'
+import { open, close, atomicWrite, dequeueNextMessage, finishMessage, snapshotRead } from '../index'
 
-test('sync function from native code', (t) => {
-  const fixture = 42
-  t.is(plus100(fixture), fixture + 100)
+test('native function exports', (t) => {
+  t.is(typeof open, 'function');
+  t.is(typeof close, 'function');
+  t.is(typeof atomicWrite, 'function');
+  t.is(typeof dequeueNextMessage, 'function');
+  t.is(typeof finishMessage, 'function');
+  t.is(typeof snapshotRead, 'function');
 })
