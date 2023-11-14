@@ -161,6 +161,7 @@ jobs:
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+        working-directory: ./napi
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
