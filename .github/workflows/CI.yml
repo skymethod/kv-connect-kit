@@ -48,10 +48,10 @@ jobs:
           #     apt-get -y install protobuf-compiler &&
           #     yarn build --target x86_64-unknown-linux-gnu &&
           #     strip *.node
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: set -e && apk update && apk add --no-cache make protobuf-dev && yarn build && strip *.node
+          # - host: ubuntu-latest
+          #   target: x86_64-unknown-linux-musl
+          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+          #   build: set -e && apk update && apk add --no-cache make protobuf-dev && yarn build && strip *.node
           # - host: macos-latest
           #   target: aarch64-apple-darwin
           #   build: |
@@ -62,13 +62,14 @@ jobs:
           #     export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
           #     yarn build --target aarch64-apple-darwin
           #     strip -x *.node
-          # - host: ubuntu-latest
-          #   target: aarch64-unknown-linux-gnu
-          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-          #   build: |-
-          #     set -e &&
-          #     yarn build --target aarch64-unknown-linux-gnu &&
-          #     aarch64-unknown-linux-gnu-strip *.node
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+            build: |-
+              set -e &&
+              apt-get -y install protobuf-compiler &&
+              yarn build --target aarch64-unknown-linux-gnu &&
+              aarch64-unknown-linux-gnu-strip *.node
           # - host: ubuntu-latest
           #   target: armv7-unknown-linux-gnueabihf
           #   setup: |
@@ -283,44 +284,8 @@ jobs:
   #     - name: Test bindings
   #       run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
   #       working-directory: ./napi
-  test-linux-x64-musl-binding:
-    name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
-    needs:
-      - build
-    strategy:
-      fail-fast: false
-      matrix:
-        node:
-          - '18'
-          - '20'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: yarn
-          cache-dependency-path: ./napi/yarn.lock
-      - name: Install dependencies
-        run: |
-          yarn config set supportedArchitectures.libc "musl"
-          yarn install
-        working-directory: ./napi
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: bindings-x86_64-unknown-linux-musl
-          path: ./napi
-      - name: List packages
-        run: ls -R .
-        shell: bash
-        working-directory: ./napi
-      - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-alpine yarn test
-        working-directory: ./napi
-  # test-linux-aarch64-gnu-binding:
-  #   name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
+  # test-linux-x64-musl-binding:
+  #   name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
   #   needs:
   #     - build
   #   strategy:
@@ -332,36 +297,72 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #     - uses: actions/checkout@v4
+  #     - name: Setup node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: ${{ matrix.node }}
+  #         cache: yarn
+  #         cache-dependency-path: ./napi/yarn.lock
+  #     - name: Install dependencies
+  #       run: |
+  #         yarn config set supportedArchitectures.libc "musl"
+  #         yarn install
+  #       working-directory: ./napi
   #     - name: Download artifacts
   #       uses: actions/download-artifact@v3
   #       with:
-  #         name: bindings-aarch64-unknown-linux-gnu
-  #         path: .
+  #         name: bindings-x86_64-unknown-linux-musl
+  #         path: ./napi
   #     - name: List packages
   #       run: ls -R .
   #       shell: bash
   #       working-directory: ./napi
-  #     - name: Install dependencies
-  #       run: |
-  #         yarn config set supportedArchitectures.cpu "arm64"
-  #         yarn config set supportedArchitectures.libc "glibc"
-  #         yarn install
+  #     - name: Test bindings
+  #       run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-alpine yarn test
   #       working-directory: ./napi
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v3
-  #       with:
-  #         platforms: arm64
-  #     - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-  #       working-directory: ./napi
-  #     - name: Setup and run tests
-  #       uses: addnab/docker-run-action@v3
-  #       with:
-  #         image: node:${{ matrix.node }}-slim
-  #         options: '--platform linux/arm64 -v ${{ github.workspace }}:/build -w /build'
-  #         run: |
-  #           set -e
-  #           yarn test
-  #           ls -la
+  test-linux-aarch64-gnu-binding:
+    name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - '18'
+          - '20'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-aarch64-unknown-linux-gnu
+          path: ./napi
+      - name: List packages
+        run: ls -R .
+        shell: bash
+        working-directory: ./napi
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.cpu "arm64"
+          yarn config set supportedArchitectures.libc "glibc"
+          yarn install
+        working-directory: ./napi
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+        working-directory: ./napi
+      - name: Setup and run tests
+        uses: addnab/docker-run-action@v3
+        with:
+          image: node:${{ matrix.node }}-slim
+          options: '--platform linux/arm64 -v ${{ github.workspace }}/napi:/build -w /build'
+          run: |
+            set -e
+            yarn test
+            ls -la
   # test-linux-aarch64-musl-binding:
   #   name: Test bindings on aarch64-unknown-linux-musl - node@lts
   #   needs:
