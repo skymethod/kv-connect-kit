@@ -30,6 +30,7 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
             build: |
+              brew install protobuf
               yarn build
               strip -x *.node
           # - host: windows-latest
@@ -60,6 +61,7 @@ jobs:
               export CXX=$(xcrun -f clang++);
               SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
               export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
+              brew install protobuf
               yarn build --target aarch64-apple-darwin
               strip -x *.node
           # - host: ubuntu-latest
