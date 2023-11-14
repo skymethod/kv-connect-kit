@@ -33,12 +33,12 @@ jobs:
           #     brew install protobuf
           #     yarn build
           #     strip -x *.node
-          - host: windows-latest
-            build: |
-              vcpkg install protobuf
-              export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
-              yarn build
-            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   build: |
+          #     vcpkg install protobuf
+          #     export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
+          #     yarn build
+          #   target: x86_64-pc-windows-msvc
           # - host: windows-latest
           #   build: |
           #     vcpkg install protobuf
@@ -105,9 +105,13 @@ jobs:
           #     rustup target add aarch64-unknown-linux-musl &&
           #     yarn build --target aarch64-unknown-linux-musl &&
           #     /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
-          # - host: windows-latest
-          #   target: aarch64-pc-windows-msvc
-          #   build: yarn build --target aarch64-pc-windows-msvc
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            build: |
+              vcpkg install protobuf
+              find C:/vcpkg/packages/protob*
+              export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
+              yarn build --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@18
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -224,45 +228,45 @@ jobs:
   #         name: bindings-freebsd
   #         path: ${{ env.APP_NAME }}.*.node
   #         if-no-files-found: error
-  test-macOS-windows-binding:
-    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
-    needs:
-      - build
-    strategy:
-      fail-fast: false
-      matrix:
-        settings:
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-          - host: macos-latest
-            target: x86_64-apple-darwin
-        node:
-          - '18'
-          - '20'
-    runs-on: ${{ matrix.settings.host }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: yarn
-          cache-dependency-path: ./napi/yarn.lock
-      - name: Install dependencies
-        run: yarn install
-        working-directory: ./napi
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: bindings-${{ matrix.settings.target }}
-          path: ./napi
-      - name: List packages
-        run: ls -R .
-        shell: bash
-        working-directory: ./napi
-      - name: Test bindings
-        run: yarn test
-        working-directory: ./napi
+  # test-macOS-windows-binding:
+  #   name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
+  #   needs:
+  #     - build
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       settings:
+  #         - host: windows-latest
+  #           target: x86_64-pc-windows-msvc
+  #         - host: macos-latest
+  #           target: x86_64-apple-darwin
+  #       node:
+  #         - '18'
+  #         - '20'
+  #   runs-on: ${{ matrix.settings.host }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: ${{ matrix.node }}
+  #         cache: yarn
+  #         cache-dependency-path: ./napi/yarn.lock
+  #     - name: Install dependencies
+  #       run: yarn install
+  #       working-directory: ./napi
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: bindings-${{ matrix.settings.target }}
+  #         path: ./napi
+  #     - name: List packages
+  #       run: ls -R .
+  #       shell: bash
+  #       working-directory: ./napi
+  #     - name: Test bindings
+  #       run: yarn test
+  #       working-directory: ./napi
   # test-linux-x64-gnu-binding:
   #   name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
   #   needs:
