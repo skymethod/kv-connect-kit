@@ -33,16 +33,19 @@ jobs:
           #     brew install protobuf
           #     yarn build
           #     strip -x *.node
-          # - host: windows-latest
-          #   build: yarn build
-          #   target: x86_64-pc-windows-msvc
           - host: windows-latest
             build: |
               vcpkg install protobuf
               export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
-              yarn build --target i686-pc-windows-msvc
-              yarn test
-            target: i686-pc-windows-msvc
+              yarn build
+            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   build: |
+          #     vcpkg install protobuf
+          #     export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
+          #     yarn build --target i686-pc-windows-msvc
+          #     yarn test
+          #   target: i686-pc-windows-msvc
           # - host: ubuntu-latest
           #   target: x86_64-unknown-linux-gnu
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
