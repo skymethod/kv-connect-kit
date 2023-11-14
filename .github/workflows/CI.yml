@@ -9,8 +9,8 @@ env:
       - master
     tags-ignore:
       - '**'
-    paths:
-      - napi
+    # paths:
+    #   - napi
       # - '!napi/**/*.md'
       # - '!napi/LICENSE'
       # - '!napi/**/*.gitignore'
