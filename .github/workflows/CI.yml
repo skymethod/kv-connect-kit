@@ -10,6 +10,7 @@ env:
     tags-ignore:
       - '**'
     paths:
+      - '.github/workflows/*.yml'
       - 'napi/**'
       - '!napi/**/*.md'
       - '!napi/LICENSE'
