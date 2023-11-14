@@ -114,7 +114,7 @@ pub async fn dequeue_next_message(db_id: u32, debug: bool) -> Result<Either<Queu
   //   .unwrap();
 
   // let message_id: u32 = MSGS.lock().unwrap().keys().max().unwrap_or(&0) + 1;
-  // MSGS.lock().unwrap().insert(message_id,handle);
+  // MSGS.lock().unwrap().insert(message_id, handle);
   // if debug { println!("[napi] dequeue_next_message: received message db_id={:#?} message_id={:#?}", db_id, message_id) }
   
   // let bytes = Buffer::from(payload);
