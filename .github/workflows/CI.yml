@@ -22,11 +22,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        settings:
+  # build:
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       settings:
           # - host: macos-latest
           #   target: x86_64-apple-darwin
           #   build: |
@@ -112,75 +112,75 @@ jobs:
           #     find C:/vcpkg/packages/protob*
           #     export PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
           #     yarn build --target aarch64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }} - node@18
-    runs-on: ${{ matrix.settings.host }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
-        with:
-          node-version: 18
-          cache: yarn
-          cache-dependency-path: ./napi/yarn.lock
-      - name: Install
-        uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
-        with:
-          toolchain: stable
-          targets: ${{ matrix.settings.target }}
-      - name: Cache cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            .cargo-cache
-            target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
-        with:
-          version: 0.11.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
-      - name: Setup node x86
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: yarn config set supportedArchitectures.cpu "ia32"
-        shell: bash
-        working-directory: ./napi
-      - name: Install dependencies
-        run: yarn install
-        working-directory: ./napi
-      - name: Setup node x86
-        uses: actions/setup-node@v4
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        with:
-          node-version: 18
-          cache: yarn
-          architecture: x86
-          cache-dependency-path: ./napi/yarn.lock
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}/napi:/build -w /build'
-          run: ${{ matrix.settings.build }}
-      - name: Build
-        run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
-        shell: bash
-        working-directory: ./napi
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: bindings-${{ matrix.settings.target }}
-          path: napi/${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
+    # name: stable - ${{ matrix.settings.target }} - node@18
+    # runs-on: ${{ matrix.settings.host }}
+    # steps:
+    #   - uses: actions/checkout@v4
+    #   - name: Setup node
+    #     uses: actions/setup-node@v4
+    #     if: ${{ !matrix.settings.docker }}
+    #     with:
+    #       node-version: 18
+    #       cache: yarn
+    #       cache-dependency-path: ./napi/yarn.lock
+    #   - name: Install
+    #     uses: dtolnay/rust-toolchain@stable
+    #     if: ${{ !matrix.settings.docker }}
+    #     with:
+    #       toolchain: stable
+    #       targets: ${{ matrix.settings.target }}
+    #   - name: Cache cargo
+    #     uses: actions/cache@v3
+    #     with:
+    #       path: |
+    #         ~/.cargo/registry/index/
+    #         ~/.cargo/registry/cache/
+    #         ~/.cargo/git/db/
+    #         .cargo-cache
+    #         target/
+    #       key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+    #   - uses: goto-bus-stop/setup-zig@v2
+    #     if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
+    #     with:
+    #       version: 0.11.0
+    #   - name: Setup toolchain
+    #     run: ${{ matrix.settings.setup }}
+    #     if: ${{ matrix.settings.setup }}
+    #     shell: bash
+    #   - name: Setup node x86
+    #     if: matrix.settings.target == 'i686-pc-windows-msvc'
+    #     run: yarn config set supportedArchitectures.cpu "ia32"
+    #     shell: bash
+    #     working-directory: ./napi
+    #   - name: Install dependencies
+    #     run: yarn install
+    #     working-directory: ./napi
+    #   - name: Setup node x86
+    #     uses: actions/setup-node@v4
+    #     if: matrix.settings.target == 'i686-pc-windows-msvc'
+    #     with:
+    #       node-version: 18
+    #       cache: yarn
+    #       architecture: x86
+    #       cache-dependency-path: ./napi/yarn.lock
+    #   - name: Build in docker
+    #     uses: addnab/docker-run-action@v3
+    #     if: ${{ matrix.settings.docker }}
+    #     with:
+    #       image: ${{ matrix.settings.docker }}
+    #       options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}/napi:/build -w /build'
+    #       run: ${{ matrix.settings.build }}
+    #   - name: Build
+    #     run: ${{ matrix.settings.build }}
+    #     if: ${{ !matrix.settings.docker }}
+    #     shell: bash
+    #     working-directory: ./napi
+    #   - name: Upload artifact
+    #     uses: actions/upload-artifact@v3
+    #     with:
+    #       name: bindings-${{ matrix.settings.target }}
+    #       path: napi/${{ env.APP_NAME }}.*.node
+    #       if-no-files-found: error
   build-freebsd:
     runs-on: macos-12
     name: Build FreeBSD
