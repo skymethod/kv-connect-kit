@@ -39,6 +39,7 @@ jobs:
           - host: windows-latest
             build: |
               vcpkg install protobuf
+              set PROTOC=C:/vcpkg/packages/protobuf_x64-windows/tools/protobuf/protoc.exe
               yarn build --target i686-pc-windows-msvc
               yarn test
             target: i686-pc-windows-msvc
