@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = {version="2", features=["async"]}
 napi-derive = "2"
-denokv_sqlite = { git = "https://github.com/denoland/denokv.git", package="denokv_sqlite" }
-denokv_proto = { git = "https://github.com/denoland/denokv.git", package="denokv_proto" }
+denokv_sqlite = { git = "https://github.com/denoland/denokv.git", rev = "0dbd088949816a5e0b922eb551dbfc43580928f5", package = "denokv_sqlite" }
+denokv_proto = { git = "https://github.com/denoland/denokv.git", rev = "0dbd088949816a5e0b922eb551dbfc43580928f5", package = "denokv_proto" }
 rand = "0.8.5"
 rand_distr = "0.3.0"
 tokio = { version = "1.33.0", features = ["full"] }
