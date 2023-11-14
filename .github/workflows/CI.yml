@@ -9,13 +9,13 @@ env:
       - master
     tags-ignore:
       - '**'
-    # paths:
-    #   - napi
-      # - '!napi/**/*.md'
-      # - '!napi/LICENSE'
-      # - '!napi/**/*.gitignore'
-      # - '!napi/.editorconfig'
-      # - '!napi/docs/**'
+    paths:
+      - 'napi/**'
+      - '!napi/**/*.md'
+      - '!napi/LICENSE'
+      - '!napi/**/*.gitignore'
+      - '!napi/.editorconfig'
+      - '!napi/docs/**'
   pull_request: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -145,7 +145,6 @@ jobs:
           node-version: 18
           cache: yarn
           architecture: x86
-        working-directory: ./napi
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
@@ -163,7 +162,6 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
-        working-directory: ./napi
   build-freebsd:
     runs-on: macos-12
     name: Build FreeBSD
@@ -211,7 +209,6 @@ jobs:
           name: bindings-freebsd
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
-        working-directory: ./napi
   test-macOS-windows-binding:
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
@@ -243,7 +240,6 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -277,7 +273,6 @@ jobs:
         with:
           name: bindings-x86_64-unknown-linux-gnu
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -313,7 +308,6 @@ jobs:
         with:
           name: bindings-x86_64-unknown-linux-musl
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -339,7 +333,6 @@ jobs:
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -354,7 +347,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-        working-directory: ./napi
       - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
         working-directory: ./napi
       - name: Setup and run tests
@@ -366,7 +358,6 @@ jobs:
             set -e
             yarn test
             ls -la
-        working-directory: ./napi
   test-linux-aarch64-musl-binding:
     name: Test bindings on aarch64-unknown-linux-musl - node@lts
     needs:
@@ -379,7 +370,6 @@ jobs:
         with:
           name: bindings-aarch64-unknown-linux-musl
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -394,7 +384,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-        working-directory: ./napi
       - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
         working-directory: ./napi
       - name: Setup and run tests
@@ -405,7 +394,6 @@ jobs:
           run: |
             set -e
             yarn test
-        working-directory: ./napi
   test-linux-arm-gnueabihf-binding:
     name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
     needs:
@@ -424,7 +412,6 @@ jobs:
         with:
           name: bindings-armv7-unknown-linux-gnueabihf
           path: .
-        working-directory: ./napi
       - name: List packages
         run: ls -R .
         shell: bash
@@ -438,7 +425,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm
-        working-directory: ./napi
       - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
         working-directory: ./napi
       - name: Setup and run tests
@@ -450,7 +436,6 @@ jobs:
             set -e
             yarn test
             ls -la
-        working-directory: ./napi
   # publish:
   #   name: Publish
   #   runs-on: ubuntu-latest
