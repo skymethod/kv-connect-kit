@@ -249,39 +249,39 @@ jobs:
   #     - name: Test bindings
   #       run: yarn test
   #       working-directory: ./napi
-  # test-linux-x64-gnu-binding:
-  #   name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
-  #   needs:
-  #     - build
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       node:
-  #         - '18'
-  #         - '20'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Setup node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: ${{ matrix.node }}
-  #         cache: yarn
-  #     - name: Install dependencies
-  #       run: yarn install
-  #       working-directory: ./napi
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: bindings-x86_64-unknown-linux-gnu
-  #         path: .
-  #     - name: List packages
-  #       run: ls -R .
-  #       shell: bash
-  #       working-directory: ./napi
-  #     - name: Test bindings
-  #       run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
-  #       working-directory: ./napi
+  test-linux-x64-gnu-binding:
+    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - '18'
+          - '20'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install
+        working-directory: ./napi
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: ./napi
+      - name: List packages
+        run: ls -R .
+        shell: bash
+        working-directory: ./napi
+      - name: Test bindings
+        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
+        working-directory: ./napi
   # test-linux-x64-musl-binding:
   #   name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
   #   needs:
