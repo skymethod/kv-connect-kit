@@ -479,10 +479,11 @@ jobs:
           cache-dependency-path: ./napi/yarn.lock
       - name: Install dependencies
         run: yarn install
+        working-directory: ./napi
       - name: Download all artifacts
         uses: actions/download-artifact@v3
         with:
-          path: .napi/artifacts
+          path: napi/artifacts
       - name: Move artifacts
         run: yarn artifacts
         working-directory: ./napi

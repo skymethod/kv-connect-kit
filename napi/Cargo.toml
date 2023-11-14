@@ -1,5 +1,5 @@
 [package]
-authors = ["John Spurlock <john@skymethod.com>"]
+authors = []
 edition = "2021"
 name    = "kv-connect-kit-napi"
 version = "0.1.0"
