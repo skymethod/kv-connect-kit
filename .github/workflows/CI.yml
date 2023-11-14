@@ -27,20 +27,20 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            build: |
-              brew install protobuf
-              yarn build
-              strip -x *.node
-          # - host: windows-latest
-          #   build: yarn build
-          #   target: x86_64-pc-windows-msvc
-          # - host: windows-latest
+          # - host: macos-latest
+          #   target: x86_64-apple-darwin
           #   build: |
-          #     yarn build --target i686-pc-windows-msvc
-          #     yarn test
-          #   target: i686-pc-windows-msvc
+          #     brew install protobuf
+          #     yarn build
+          #     strip -x *.node
+          - host: windows-latest
+            build: yarn build
+            target: x86_64-pc-windows-msvc
+          - host: windows-latest
+            build: |
+              yarn build --target i686-pc-windows-msvc
+              yarn test
+            target: i686-pc-windows-msvc
           # - host: ubuntu-latest
           #   target: x86_64-unknown-linux-gnu
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
@@ -53,17 +53,17 @@ jobs:
           #   target: x86_64-unknown-linux-musl
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
           #   build: set -e && apk update && apk add --no-cache make protobuf-dev && yarn build && strip *.node
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            build: |
-              sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*;
-              export CC=$(xcrun -f clang);
-              export CXX=$(xcrun -f clang++);
-              SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
-              export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
-              brew install protobuf
-              yarn build --target aarch64-apple-darwin
-              strip -x *.node
+          # - host: macos-latest
+          #   target: aarch64-apple-darwin
+          #   build: |
+          #     sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*;
+          #     export CC=$(xcrun -f clang);
+          #     export CXX=$(xcrun -f clang++);
+          #     SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
+          #     export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
+          #     brew install protobuf
+          #     yarn build --target aarch64-apple-darwin
+          #     strip -x *.node
           # - host: ubuntu-latest
           #   target: aarch64-unknown-linux-gnu
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
@@ -100,9 +100,9 @@ jobs:
           #     rustup target add aarch64-unknown-linux-musl &&
           #     yarn build --target aarch64-unknown-linux-musl &&
           #     /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
-          # - host: windows-latest
-          #   target: aarch64-pc-windows-msvc
-          #   build: yarn build --target aarch64-pc-windows-msvc
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            build: yarn build --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@18
     runs-on: ${{ matrix.settings.host }}
     steps:
