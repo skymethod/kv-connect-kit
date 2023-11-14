@@ -106,25 +106,30 @@ pub async fn dequeue_next_message(db_id: u32, debug: bool) -> Result<Either<Queu
     if debug { println!("[napi] dequeue_next_message: no messages! db_id={:#?}", db_id) }
     return Ok(Either::B(()));
   }
-  let mut handle = opt_handle.unwrap();
-  let payload = handle.take_payload()
-    .await
-    .unwrap();
 
-  let message_id: u32 = MSGS.lock().unwrap().keys().max().unwrap_or(&0) + 1;
-  MSGS.lock().unwrap().insert(message_id,handle);
-  if debug { println!("[napi] dequeue_next_message: received message db_id={:#?} message_id={:#?}", db_id, message_id) }
+  // TODO wait for updates to land in denoland/denokv
+  // let mut handle = opt_handle.unwrap();
+  // let payload = handle.take_payload()
+  //   .await
+  //   .unwrap();
+
+  // let message_id: u32 = MSGS.lock().unwrap().keys().max().unwrap_or(&0) + 1;
+  // MSGS.lock().unwrap().insert(message_id,handle);
+  // if debug { println!("[napi] dequeue_next_message: received message db_id={:#?} message_id={:#?}", db_id, message_id) }
   
-  let bytes = Buffer::from(payload);
-  Ok(Either::A(QueueMessage { bytes, message_id }))
+  // let bytes = Buffer::from(payload);
+  // Ok(Either::A(QueueMessage { bytes, message_id }))
+  Ok(Either::B(()))
 }
 
 #[napi]
 pub async fn finish_message(db_id: u32, message_id: u32, success: bool, debug: bool) {
   if debug { println!("[napi] finish_message db_id={:#?} message_id={:#?} success={:#?}", db_id, message_id, success) }
   let opt_handle = MSGS.lock().unwrap().remove(&message_id);
-  let handle = opt_handle.unwrap();
-  handle.finish(success).await.unwrap();
+  let _handle = opt_handle.unwrap();
+
+  // TODO wait for updates to land in denoland/denokv
+  // handle.finish(success).await.unwrap();
 }
 
 //
