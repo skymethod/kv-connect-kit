@@ -1,0 +1,32 @@
+{
+  "name": "kv-connect-kit-napi-android-arm-eabi",
+  "version": "1.0.0",
+  "os": [
+    "android"
+  ],
+  "cpu": [
+    "arm"
+  ],
+  "main": "kv-connect-kit-napi.android-arm-eabi.node",
+  "files": [
+    "kv-connect-kit-napi.android-arm-eabi.node"
+  ],
+  "description": "Experimental napi sqlite backend leveraging denoland/denokv",
+  "keywords": [
+    "napi-rs",
+    "NAPI",
+    "N-API",
+    "Rust",
+    "node-addon",
+    "node-addon-api"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "repository": "git@github.com:skymethod/kv-connect-kit.git"
+}

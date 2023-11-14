@@ -1,0 +1,45 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - '**'
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'yarn'
+
+      - name: Install
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install dependencies
+        run: yarn install
+        working-directory: ./napi
+
+      - name: ESLint
+        run: yarn lint
+        working-directory: ./napi
+
+      - name: Cargo fmt
+        run: cargo fmt -- --check
+        working-directory: ./napi
+
+      - name: Clippy
+        run: cargo clippy
+        working-directory: ./napi
