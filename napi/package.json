@@ -1,10 +1,12 @@
 {
-  "name": "kv-connect-kit-napi",
-  "version": "1.0.0",
-  "description": "Experimental napi sqlite backend leveraging denoland/denokv",
+  "name": "@skymethod/kv-connect-kit-napi",
+  "version": "0.0.5",
+  "description": "Experimental kv-connect-kit napi sqlite backend leveraging denoland/denokv",
   "main": "index.js",
   "license": "MIT",
   "keywords": [
+    "deno",
+    "kv",
     "napi-rs",
     "NAPI",
     "N-API",
@@ -35,7 +37,7 @@
     }
   },
   "engines": {
-    "node": ">= 10"
+    "node": ">= 18"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
