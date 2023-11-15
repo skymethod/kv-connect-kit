@@ -34,7 +34,7 @@
     "type": "git",
     "url": "https://github.com/skymethod/kv-connect-kit.git",
     "directory": "napi"
-  }
+  },
   "libc": [
     "musl"
   ]
