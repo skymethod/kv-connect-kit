@@ -1,6 +1,6 @@
 {
   "name": "@skymethod/kv-connect-kit-napi-win32-ia32-msvc",
-  "version": "0.0.5-next.2",
+  "version": "0.0.5-next.3",
   "os": [
     "win32"
   ],
