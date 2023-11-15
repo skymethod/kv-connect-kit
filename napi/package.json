@@ -1,6 +1,6 @@
 {
   "name": "@skymethod/kv-connect-kit-napi",
-  "version": "0.0.5",
+  "version": "0.0.5-next.0",
   "description": "Experimental kv-connect-kit napi sqlite backend leveraging denoland/denokv",
   "main": "index.js",
   "license": "MIT",

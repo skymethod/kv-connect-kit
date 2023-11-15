@@ -1,6 +1,6 @@
 {
   "name": "@skymethod/kv-connect-kit-napi-linux-arm64-musl",
-  "version": "0.0.5",
+  "version": "0.0.5-next.0",
   "os": [
     "linux"
   ],
