@@ -29,7 +29,7 @@ await build({
         license: 'MIT',
         repository: {
             type: 'git',
-            url: 'git+https://github.com/skymethod/kv-connect-kit.git',
+            url: 'https://github.com/skymethod/kv-connect-kit.git',
         },
         bugs: {
             url: 'https://github.com/skymethod/kv-connect-kit/issues',

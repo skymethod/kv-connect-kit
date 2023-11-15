@@ -9,7 +9,7 @@ Minimal Typescript client implementing the [KV Connect protocol](https://github.
 ### Quick start - Deno
 
 ```ts
-import { makeRemoteService } from 'https://raw.githubusercontent.com/skymethod/kv-connect-kit/v0.0.4/client.ts';
+import { makeRemoteService } from 'https://raw.githubusercontent.com/skymethod/kv-connect-kit/v0.0.5/src/remote.ts';
 
 const accessToken = Deno.env.get('DENO_KV_ACCESS_TOKEN');
 if (accessToken === undefined) throw new Error(`Set your personal access token: https://dash.deno.com/account#access-tokens`);
@@ -136,6 +136,12 @@ export interface RemoteServiceOptions {
      * Defaults to global 'fetch'`
      */
     readonly fetcher?: Fetcher;
+
+    /** Max number of times to attempt to retry certain fetch errors (like 5xx) */
+    readonly maxRetries?: number;
+
+    /** Limit to specific KV Connect protocol versions */
+    readonly supportedVersions?: KvConnectProtocolVersion[];
 }
 ```
 
@@ -147,7 +153,7 @@ Deno KV _values_ support any structured-serializable JavaScript values, using V8
 
 A default V8 serializer is included that supports a limited subset of values (see below), but can optionally treat the values as opaque bytes using the `wrapUnknownValues` option.  This is often good enough for listing/migrating/logic that behaves on keys only.
 
-If anyone knows of a pure JS or WASM implementation of V8's serializer, please let me know!
+We may be able to leverage [denoland/v8_valueserializer](https://github.com/denoland/v8_valueserializer) for a WASM implementation of V8's serializer in the future!
 
 KV value types supported by the default serializer:
 
