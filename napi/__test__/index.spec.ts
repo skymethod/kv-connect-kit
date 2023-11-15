@@ -10,3 +10,11 @@ test('native function exports', (t) => {
   t.is(typeof finishMessage, 'function');
   t.is(typeof snapshotRead, 'function');
 })
+
+test('memory db open/close', (t) => {
+  t.notThrows(() => {
+    const debug = false;
+    const dbId = open(':memory:', debug);
+    close(dbId, debug);
+  })
+})

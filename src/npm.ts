@@ -5,6 +5,8 @@ import { makeRemoteService } from './remote.ts';
 
 export * from './napi_based.ts';
 export * from './remote.ts';
+export * from './in_memory.ts';
+export * from './kv_types.ts';
 export { UnknownV8 } from './v8.ts';
 
 export async function openKv(path?: string, opts: Record<string, unknown> & { debug?: boolean } = {}) {

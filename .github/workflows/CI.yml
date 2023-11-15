@@ -462,8 +462,8 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write
+      contents: write # to create tags
+      id-token: write # to publish provenance
     needs:
       - build-freebsd
       - test-macOS-windows-binding
