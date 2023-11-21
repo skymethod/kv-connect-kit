@@ -1,12 +1,12 @@
 // deno-lint-ignore-file no-explicit-any
-import { assert } from 'https://deno.land/std@0.206.0/assert/assert.ts';
-import { assertEquals } from 'https://deno.land/std@0.206.0/assert/assert_equals.ts';
-import { assertExists } from 'https://deno.land/std@0.206.0/assert/assert_exists.ts';
-import { assertFalse } from 'https://deno.land/std@0.206.0/assert/assert_false.ts';
-import { assertMatch } from 'https://deno.land/std@0.206.0/assert/assert_match.ts';
-import { assertNotEquals } from 'https://deno.land/std@0.206.0/assert/assert_not_equals.ts';
-import { assertRejects } from 'https://deno.land/std@0.206.0/assert/assert_rejects.ts';
-import { assertThrows } from 'https://deno.land/std@0.206.0/assert/assert_throws.ts';
+import { assert } from 'https://deno.land/std@0.207.0/assert/assert.ts';
+import { assertEquals } from 'https://deno.land/std@0.207.0/assert/assert_equals.ts';
+import { assertExists } from 'https://deno.land/std@0.207.0/assert/assert_exists.ts';
+import { assertFalse } from 'https://deno.land/std@0.207.0/assert/assert_false.ts';
+import { assertMatch } from 'https://deno.land/std@0.207.0/assert/assert_match.ts';
+import { assertNotEquals } from 'https://deno.land/std@0.207.0/assert/assert_not_equals.ts';
+import { assertRejects } from 'https://deno.land/std@0.207.0/assert/assert_rejects.ts';
+import { assertThrows } from 'https://deno.land/std@0.207.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
 import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';

@@ -1,6 +1,6 @@
-import { chunk } from 'https://deno.land/std@0.206.0/collections/chunk.ts';
-import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
-import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.206.0/semver/mod.ts';
+import { chunk } from 'https://deno.land/std@0.207.0/collections/chunk.ts';
+import { parseArgs as parseFlags } from 'https://deno.land/std@0.207.0/cli/parse_args.ts';
+import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.207.0/semver/mod.ts';
 import { makeRemoteService } from './remote.ts';
 import { makeNativeService } from './native.ts';
 import { endToEnd } from './e2e.ts';
@@ -60,68 +60,68 @@ async function clear(service: KvService, path: string) {
 const denoKvAccessToken = (await Deno.permissions.query({ name: 'env', variable: 'DENO_KV_ACCESS_TOKEN' })).state === 'granted' && Deno.env.get('DENO_KV_ACCESS_TOKEN');
 const denoKvDatabaseId = (await Deno.permissions.query({ name: 'env', variable: 'DENO_KV_DATABASE_ID' })).state === 'granted' && Deno.env.get('DENO_KV_DATABASE_ID');
 
-if (typeof denoKvAccessToken === 'string' && denoKvDatabaseId) {
-    Deno.test({
-        name: 'e2e-deno-remote',
-        fn: async () => {
-            const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
-            const service = makeNativeService();
+Deno.test({
+    name: 'e2e-deno-remote',
+    only: false,
+    ignore: !(typeof denoKvAccessToken === 'string' && denoKvDatabaseId),
+    fn: async () => {
+        const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
+        const service = makeNativeService();
+        await clear(service, path);
+        try {
+            await endToEnd(service, { type: 'deno', path });
+        } finally {
             await clear(service, path);
-            try {
-                await endToEnd(service, { type: 'deno', path });
-            } finally {
-                await clear(service, path);
-            }
-        },
-    });
+        }
+    },
+});
 
-    Deno.test({
-        name: 'e2e-kck-remote',
-        only: false,
-        fn: async () => {
-            const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
-            const service = makeRemoteService({ accessToken: denoKvAccessToken, debug });
+Deno.test({
+    name: 'e2e-kck-remote',
+    only: false,
+    ignore: !(typeof denoKvAccessToken === 'string' && denoKvDatabaseId),
+    fn: async () => {
+        const path = `https://api.deno.com/databases/${denoKvDatabaseId}/connect`;
+        const service = makeRemoteService({ accessToken: denoKvAccessToken as string, debug });
+        await clear(service, path);
+        try {
+            await endToEnd(service, { type: 'kck', subtype: 'remote', path });
+        } finally {
             await clear(service, path);
-            try {
-                await endToEnd(service, { type: 'kck', subtype: 'remote', path });
-            } finally {
-                await clear(service, path);
-            }
-        },
-    });
-}
+        }
+    },
+});
 
 const localKvUrl = (await Deno.permissions.query({ name: 'env', variable: 'LOCAL_KV_URL' })).state === 'granted' && Deno.env.get('LOCAL_KV_URL');
 
-if (typeof denoKvAccessToken === 'string' && localKvUrl) {
-    Deno.test({
-        only: false,
-        ignore: compareVersion(parseVersion(Deno.version.deno), parseVersion('1.38.0')) < 0,
-        name: 'e2e-deno-localkv',
-        fn: async () => {
-            const path = localKvUrl;
-            const service = makeNativeService();
+Deno.test({
+    only: false,
+    ignore: compareVersion(parseVersion(Deno.version.deno), parseVersion('1.38.0')) < 0 || !(typeof denoKvAccessToken === 'string' && localKvUrl),
+    name: 'e2e-deno-localkv',
+    fn: async () => {
+        const path = localKvUrl as string;
+        const service = makeNativeService();
+        await clear(service, path);
+        try {
+            await endToEnd(service, { type: 'deno', path });
+        } finally {
             await clear(service, path);
-            try {
-                await endToEnd(service, { type: 'deno', path });
-            } finally {
-                await clear(service, path);
-            }
-        },
-    });
+        }
+    },
+});
 
-    Deno.test({
-        only: false,
-        name: 'e2e-kck-localkv',
-        fn: async () => {
-            const path = localKvUrl;
-            const service = makeRemoteService({ accessToken: denoKvAccessToken, debug, maxRetries: 0 });
+Deno.test({
+    only: false,
+    ignore: !(typeof denoKvAccessToken === 'string' && localKvUrl),
+    name: 'e2e-kck-localkv',
+    fn: async () => {
+        const path = localKvUrl as string;
+        const service = makeRemoteService({ accessToken: denoKvAccessToken as string, debug, maxRetries: 0 });
+        await clear(service, path);
+        try {
+            await endToEnd(service, { type: 'kck', subtype: 'remote', path });
+        } finally {
             await clear(service, path);
-            try {
-                await endToEnd(service, { type: 'kck', subtype: 'remote', path });
-            } finally {
-                await clear(service, path);
-            }
-        },
-    });
-}
+        }
+    },
+});

@@ -1,7 +1,12 @@
-import { parse as parseFlags } from 'https://deno.land/std@0.206.0/flags/mod.ts';
+import { parseArgs as parseFlags } from 'https://deno.land/std@0.207.0/cli/parse_args.ts';
 import { endToEnd } from '../src/e2e.ts';
 import { makeSqliteService } from './sqlite.ts';
-import { SqliteNativeDriver } from './sqlite_native_driver.ts';
+
+const SqliteNativeDriver = await (async () => {
+    if ((await Deno.permissions.query({ name: 'env', variable: 'DENO_DIR' })).state !== 'granted') return undefined;
+    const { SqliteNativeDriver } = await import('./sqlite_native_driver.ts');
+    return SqliteNativeDriver;
+})();
 
 const flags = parseFlags(Deno.args);
 const debug = !!flags.debug;
@@ -17,8 +22,9 @@ Deno.test({
 Deno.test({
     name: 'e2e-kck-native-memory',
     only: false,
+    ignore: SqliteNativeDriver === undefined,
     fn: async () => {
-        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', subtype: 'sqlite', path: ':memory:' });
+        await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver!() }), { type: 'kck', subtype: 'sqlite', path: ':memory:' });
     }
 });
 
@@ -38,10 +44,11 @@ Deno.test({
 Deno.test({
     name: 'e2e-kck-native-disk',
     only: false,
+    ignore: SqliteNativeDriver === undefined,
     fn: async () => {
         const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
         try {
-            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver() }), { type: 'kck', subtype: 'sqlite', path });
+            await endToEnd(makeSqliteService({ debug, maxQueueAttempts: 1, driver: new SqliteNativeDriver!() }), { type: 'kck', subtype: 'sqlite', path });
         } finally {
             await Deno.remove(path);
         }

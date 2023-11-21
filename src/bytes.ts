@@ -1,4 +1,4 @@
-export { encodeHex, decodeHex } from 'https://deno.land/std@0.206.0/encoding/hex.ts';
+export { encodeHex, decodeHex } from 'https://deno.land/std@0.207.0/encoding/hex.ts';
 
 export function checkEnd(bytes: Uint8Array, pos: number) {
     const extra = bytes.length - pos;

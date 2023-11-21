@@ -1,5 +1,5 @@
 import { encodeV8, decodeV8 } from './v8.ts';
-import { assertEquals } from 'https://deno.land/std@0.206.0/assert/assert_equals.ts';
+import { assertEquals } from 'https://deno.land/std@0.207.0/assert/assert_equals.ts';
 
 Deno.test({
     name: 'encodeV8/decodeV8',

@@ -1,4 +1,4 @@
-import { Deferred, deferred } from 'https://deno.land/std@0.206.0/async/deferred.ts';
+import { Deferred, deferred } from 'https://deno.land/std@0.207.0/async/deferred.ts';
 import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn, isRecord, checkMatches } from './check.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
