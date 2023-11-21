@@ -152,7 +152,7 @@ function computeEnqueueMessage(value: unknown, encodeV8: EncodeV8, { delay = 0, 
     return {
         backoffSchedule: [ 100, 200, 400, 800 ],
         deadlineMs: `${Date.now() + delay}`,
-        kvKeysIfUndelivered: keysIfUndelivered.map(packKey),
+        keysIfUndelivered: keysIfUndelivered.map(packKey),
         payload: encodeV8(value),
     }
 }

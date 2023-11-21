@@ -7,6 +7,11 @@ import {
   decodeBinary as decodeBinary_1,
 } from "./ReadRangeOutput.ts";
 import {
+  Type as SnapshotReadStatus,
+  name2num,
+  num2name,
+} from "./SnapshotReadStatus.ts";
+import {
   tsValueToJsonValueFns,
   jsonValueToTsValueFns,
 } from "../../../../../runtime/json/scalar.ts";
@@ -22,6 +27,9 @@ import {
   wireValueToTsValueFns,
 } from "../../../../../runtime/wire/scalar.ts";
 import {
+  default as Long,
+} from "../../../../../runtime/Long.ts";
+import {
   default as deserialize,
 } from "../../../../../runtime/wire/deserialize.ts";
 
@@ -30,6 +38,7 @@ export declare namespace $.com.deno.kv.datapath {
     ranges: ReadRangeOutput[];
     readDisabled: boolean;
     readIsStronglyConsistent: boolean;
+    status: SnapshotReadStatus;
   }
 }
 
@@ -40,6 +49,7 @@ export function getDefaultValue(): $.com.deno.kv.datapath.SnapshotReadOutput {
     ranges: [],
     readDisabled: false,
     readIsStronglyConsistent: false,
+    status: "SR_UNSPECIFIED",
   };
 }
 
@@ -55,6 +65,7 @@ export function encodeJson(value: $.com.deno.kv.datapath.SnapshotReadOutput): un
   result.ranges = value.ranges.map(value => encodeJson_1(value));
   if (value.readDisabled !== undefined) result.readDisabled = tsValueToJsonValueFns.bool(value.readDisabled);
   if (value.readIsStronglyConsistent !== undefined) result.readIsStronglyConsistent = tsValueToJsonValueFns.bool(value.readIsStronglyConsistent);
+  if (value.status !== undefined) result.status = tsValueToJsonValueFns.enum(value.status);
   return result;
 }
 
@@ -63,6 +74,7 @@ export function decodeJson(value: any): $.com.deno.kv.datapath.SnapshotReadOutpu
   result.ranges = value.ranges?.map((value: any) => decodeJson_1(value)) ?? [];
   if (value.readDisabled !== undefined) result.readDisabled = jsonValueToTsValueFns.bool(value.readDisabled);
   if (value.readIsStronglyConsistent !== undefined) result.readIsStronglyConsistent = jsonValueToTsValueFns.bool(value.readIsStronglyConsistent);
+  if (value.status !== undefined) result.status = jsonValueToTsValueFns.enum(value.status) as SnapshotReadStatus;
   return result;
 }
 
@@ -83,6 +95,12 @@ export function encodeBinary(value: $.com.deno.kv.datapath.SnapshotReadOutput): 
     const tsValue = value.readIsStronglyConsistent;
     result.push(
       [4, tsValueToWireValueFns.bool(tsValue)],
+    );
+  }
+  if (value.status !== undefined) {
+    const tsValue = value.status;
+    result.push(
+      [8, { type: WireType.Varint as const, value: new Long(name2num[tsValue as keyof typeof name2num]) }],
     );
   }
   return serialize(result);
@@ -111,6 +129,13 @@ export function decodeBinary(binary: Uint8Array): $.com.deno.kv.datapath.Snapsho
     const value = wireValueToTsValueFns.bool(wireValue);
     if (value === undefined) break field;
     result.readIsStronglyConsistent = value;
+  }
+  field: {
+    const wireValue = wireFields.get(8);
+    if (wireValue === undefined) break field;
+    const value = wireValue.type === WireType.Varint ? num2name[wireValue.value[0] as keyof typeof num2name] : undefined;
+    if (value === undefined) break field;
+    result.status = value;
   }
   return result;
 }
