@@ -1,5 +1,5 @@
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
-import { KvConsistencyLevel, KvService, KvU64 } from './kv_types.ts';
+import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
@@ -136,6 +136,10 @@ class RemoteKv extends ProtoBasedKv {
 
     protected listenQueue_(_handler: (value: unknown) => void | Promise<void>): Promise<void> {
         throw new Error(`'listenQueue' is not possible over KV Connect`);
+    }
+
+    protected watch_(_keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        throw new Error(`TODO implement watch for RemoteKv`);
     }
 
     protected close_(): void {

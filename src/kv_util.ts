@@ -260,6 +260,15 @@ export abstract class BaseKv implements Kv {
         });
     }
 
+    // deno-lint-ignore no-explicit-any
+    watch<T>(keys: readonly KvKey[], options?: { raw?: boolean }): ReadableStream<any> {
+        this.checkOpen('watch');
+        keys.forEach(checkKeyNotEmpty);
+        if (!(options === undefined || isRecord(options) && (options.raw === undefined || typeof options.raw === 'boolean'))) throw new Error(`Unexpected options: ${JSON.stringify(options)}`);
+        const { raw } = options ?? {};
+        return this.watch_(keys, raw);
+    }
+
     close(): void {
         this.checkOpen('close');
         this.closed = true;
@@ -275,6 +284,7 @@ export abstract class BaseKv implements Kv {
     protected abstract listStream<T>(outCursor: CursorHolder, selector: KvListSelector, opts: KvListOptions): AsyncGenerator<KvEntry<T>>;
     protected abstract listenQueue_(handler: (value: unknown) => void | Promise<void>): Promise<void>;
     protected abstract commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: () => void): Promise<KvCommitResult | KvCommitError>;
+    protected abstract watch_(keys: readonly KvKey[], raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]>;
     protected abstract close_(): void;
 
     //

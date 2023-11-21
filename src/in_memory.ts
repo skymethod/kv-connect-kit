@@ -176,6 +176,10 @@ class InMemoryKv extends BaseKv {
         return { ok: true, versionstamp: newVersionstamp };
     }
 
+    protected watch_(_keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        throw new Error(`TODO implement watch for InMemoryKv`);
+    }
+
     protected close_(): void {
         this.expirer.finalize();
         this.queueWorker.finalize();

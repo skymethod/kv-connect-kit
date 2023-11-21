@@ -175,6 +175,10 @@ class SqliteKv extends BaseKv {
         return this.queueWorker.listen(handler);
     }
 
+    protected watch_(_keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        throw new Error(`TODO implement watch for SqliteKv`);
+    }
+
     protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: () => void): Promise<KvCommitResult | KvCommitError> {
         const { db, statements, encodeV8, decodeV8 } = this;
         await Promise.resolve();
