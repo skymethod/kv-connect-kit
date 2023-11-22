@@ -8,7 +8,7 @@ import { assertNotEquals } from 'https://deno.land/std@0.207.0/assert/assert_not
 import { assertRejects } from 'https://deno.land/std@0.207.0/assert/assert_rejects.ts';
 import { assertThrows } from 'https://deno.land/std@0.207.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
-import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
+import { KvEntryMaybe, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
 
 export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'kck', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
@@ -318,6 +318,24 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assert((records.q2.received! - records.q2.sent) >= delay);
         if (!napi) assert((records.q3.received! - records.q3.sent) <= delay / 2);
         assertEquals((await kv.get([ 'q3' ])).value, 'q3');
+    }
+
+    // watch
+    if (type === 'kck' && pathType === 'remote' && path.includes('/localhost')) { // TODO remove once deploy supports v3
+        const results: KvEntryMaybe<unknown>[][] = [];
+        const p = (async () => {
+            for await (const entries of kv.watch<[ string ]>([ [ 'w1' ] ])) {
+                results.push(entries);
+                break;
+            }
+        })();
+        await kv.set([ 'w1' ], 'v1');
+        await p;
+        assertEquals(results.length, 1);
+        assertEquals(results[0].length, 1);
+        assertEquals(results[0][0].key, [ 'w1' ]);
+        assertEquals(results[0][0].value, 'v1');
+        assert(typeof results[0][0].versionstamp === 'string');
     }
 
     // multiple mutations on the same key

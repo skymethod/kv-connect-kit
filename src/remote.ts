@@ -1,10 +1,14 @@
-import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead } from './kv_connect_api.ts';
+import { encodeHex } from './bytes.ts';
+import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, fetchWatchStream } from './kv_connect_api.ts';
+import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8 } from './kv_util.ts';
+import { DecodeV8, EncodeV8, readValue, unpackVersionstamp } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { encodeJson as encodeJsonWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
+import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch, WatchKeyOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { ProtoBasedKv } from './proto_based.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
@@ -68,7 +72,7 @@ async function fetchNewDatabaseMetadata(url: string, accessToken: string, debug:
     if (debug) console.log(`fetchNewDatabaseMetadata: Fetching ${url}...`);
     const { metadata, responseUrl } = await fetchDatabaseMetadata(url, accessToken, fetcher, maxRetries, supportedVersions);
     const { version, endpoints, token } = metadata;
-    if (version !== 1 && version !== 2 || !supportedVersions.includes(version)) throw new Error(`Unsupported version: ${version}`);
+    if (version !== 1 && version !== 2 && version !== 3 || !supportedVersions.includes(version)) throw new Error(`Unsupported version: ${version}`);
     if (debug) console.log(`fetchNewDatabaseMetadata: Using protocol version ${version}`);
     if (typeof token !== 'string' || token === '') throw new Error(`Unsupported token: ${token}`);
     if (endpoints.length === 0) throw new Error(`No endpoints`);
@@ -101,6 +105,10 @@ function atomicWriteToString(req: AtomicWrite): string {
     return JSON.stringify(encodeJsonAtomicWrite(req));
 }
 
+function watchToString(req: Watch): string {
+    return JSON.stringify(encodeJsonWatch(req));
+}
+
 //
 
 class RemoteKv extends ProtoBasedKv {
@@ -124,7 +132,7 @@ class RemoteKv extends ProtoBasedKv {
     }
 
     static async of(url: string | undefined, opts: RemoteServiceOptions) {
-        const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, maxRetries = 10, supportedVersions = [ 1, 2 ] } = opts;
+        const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, maxRetries = 10, supportedVersions = [ 1, 2, 3 ] } = opts;
         if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         
@@ -138,8 +146,54 @@ class RemoteKv extends ProtoBasedKv {
         throw new Error(`'listenQueue' is not possible over KV Connect`);
     }
 
-    protected watch_(_keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
-        throw new Error(`TODO implement watch for RemoteKv`);
+    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        async function* yieldResults(kv: RemoteKv) {
+            const { metadata, debug, fetcher, maxRetries, decodeV8 } = kv;
+            if (metadata.version < 3) throw new Error(`watch: Only supported in version 3 of the protocol or higher`);
+            const endpointUrl = await kv.locateEndpointUrl('eventual');
+            const watchUrl = `${endpointUrl}/watch`;
+            const accessToken = metadata.token;
+            const req: Watch = {
+                keys: keys.map(v => ({ key: packKey(v) })),
+            }
+            if (debug) console.log(`watch: ${watchToString(req)}`);
+            const stream = await fetchWatchStream(watchUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
+            const reader = stream.getReader({ mode: 'byob' });
+            try {
+                while (true) {
+                    const { done, value } = await reader.read(new Uint8Array(4));
+                    if (done) {
+                        if (debug) console.log(`done! returning`);
+                        return;
+                    }
+                    const n = new DataView(value.buffer).getInt32(0, true);
+                    if (debug) console.log(`watch: ${n}-byte message`);
+                    if (n > 0) {
+                        const { done, value } = await reader.read(new Uint8Array(n));
+                        if (done) {
+                            if (debug) console.log(`watch: done before message! returning`);
+                            return;
+                        }
+                        const output = decodeWatchOutput(value);
+                        const { status, keys: outputKeys } = output;
+                        if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`); // TODO retry on READ_DISABLED
+                        const entries: KvEntryMaybe<unknown>[] = outputKeys.map((v, i) => {
+                            const { changed, entryIfChanged } = v;
+                            if (!changed || entryIfChanged === undefined) return { key: keys[i], value: null, versionstamp: null };
+                            const { value: bytes, encoding } = entryIfChanged;
+                            const value = readValue(bytes, encoding, decodeV8);
+                            const versionstamp = encodeHex(entryIfChanged.versionstamp);
+                            return { key: keys[i], value, versionstamp };
+                        })
+                        yield entries;
+                    }
+                }
+            } finally {
+                await reader.cancel();
+            }
+        }
+
+        return ReadableStream.from(yieldResults(this))
     }
 
     protected close_(): void {
@@ -155,15 +209,15 @@ class RemoteKv extends ProtoBasedKv {
             if (debug) console.log(`snapshotRead: ${snapshotReadToString(req)}`);
             return await fetchSnapshotRead(snapshotReadUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
         }
-        const responseCheck = (res: SnapshotReadOutput) => !(this.metadata.version > 1 && (res.readDisabled || consistency === 'strong' && !res.readIsStronglyConsistent));
+        const responseCheck = (res: SnapshotReadOutput) => !(this.metadata.version >= 3 && res.status === 'SR_READ_DISABLED' || res.readDisabled || consistency === 'strong' && !res.readIsStronglyConsistent);
         const res = await read();
         if (!responseCheck(res)) {
             if (debug) if (debug) console.log(`snapshotRead: response checks failed, refresh metadata and retry`);
             this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
             const res = await read();
             if (!responseCheck(res)) {
-                const { readDisabled, readIsStronglyConsistent } = res;
-                throw new Error(`snapshotRead: response checks failed after retry: ${JSON.stringify({ readDisabled, readIsStronglyConsistent })}`);
+                const { readDisabled, readIsStronglyConsistent, status } = res;
+                throw new Error(`snapshotRead: response checks failed after retry: ${JSON.stringify({ readDisabled, readIsStronglyConsistent, status })}`);
             }
             return res;
         } else {
