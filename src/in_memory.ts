@@ -1,5 +1,5 @@
 import { assertInstanceOf } from 'https://deno.land/std@0.207.0/assert/assert_instance_of.ts';
-import { RedBlackTree } from 'https://deno.land/std@0.207.0/collections/red_black_tree.ts';
+import { RedBlackTree } from 'https://deno.land/std@0.207.0/data_structures/red_black_tree.ts';
 import { compareBytes, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
@@ -47,10 +47,13 @@ const copyValueIfNecessary = (v: unknown) => v instanceof _KvU64 ? v : structure
 
 type QueueItem = { id: number, value: unknown, enqueued: number, available: number, failures: number, keysIfUndelivered: KvKey[], locked: boolean };
 
+type Watch = { keysAsBytes: Uint8Array[], onEntries: (entries: KvEntryMaybe<unknown>[]) => void };
+
 class InMemoryKv extends BaseKv {
 
     private readonly rows = new RedBlackTree<KVRow>((a, b) => compareBytes(a[0], b[0])); // keep sorted by keyBytes
     private readonly queue = new Map<number, QueueItem>();
+    private readonly watches = new Map<number, Watch>();
     private readonly expirer: Expirer;
     private readonly queueWorker: QueueWorker;
     private readonly maxQueueAttempts: number;
@@ -122,7 +125,7 @@ class InMemoryKv extends BaseKv {
     }
 
     protected async commit(checks: AtomicCheck[], mutations: KvMutation[], enqueues: Enqueue[], additionalWork?: (() => void) | undefined): Promise<KvCommitResult | KvCommitError> {
-        const { rows, queue } = this;
+        const { rows, queue, watches } = this;
         await Promise.resolve();
         for (const { key, versionstamp } of checks) {
             if (!(versionstamp === null || typeof versionstamp === 'string' && isValidVersionstamp(versionstamp))) throw new Error(`Bad 'versionstamp': ${versionstamp}`);
@@ -141,6 +144,7 @@ class InMemoryKv extends BaseKv {
             queue.set(id, { id, value: copyValueIfNecessary(value), enqueued, available, failures: 0, keysIfUndelivered, locked: false });
             minEnqueued = Math.min(enqueued, minEnqueued ?? Number.MAX_SAFE_INTEGER);
         }
+        const watchIds = new Set<number>();
         for (const mutation of mutations) {
             const { key } = mutation;
             const keyBytes = packKey(key);
@@ -168,16 +172,39 @@ class InMemoryKv extends BaseKv {
             } else {
                 throw new Error(`commit(${JSON.stringify({ checks, mutations, enqueues }, replacer)}) not implemented`);
             }
+            for (const [ watchId, watch ] of watches) {
+                if (watchIds.has(watchId)) continue;
+                if (watch.keysAsBytes.some(v => equalBytes(v, keyBytes))) watchIds.add(watchId);
+            }
         }
         if (additionalWork) additionalWork();
         if (minExpires !== undefined) this.expirer.rescheduleExpirer(minExpires);
         if (minEnqueued !== undefined) this.queueWorker.rescheduleWorker();
+        for (const watchId of watchIds) {
+            const watch = watches.get(watchId);
+            if (watch) watch.onEntries(watch.keysAsBytes.map(v => this.getOne(unpackKey(v))));
+        }
 
         return { ok: true, versionstamp: newVersionstamp };
     }
 
-    protected watch_(_keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
-        throw new Error(`TODO implement watch for InMemoryKv`);
+    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        const { watches, debug } = this;
+        const keysAsBytes = keys.map(packKey);
+        const watchId = [...watches.keys()].reduce((a, b) => Math.max(a, b), 0) + 1;
+        return new ReadableStream({
+            start(controller) {
+                if (debug) console.log(`watch: ${watchId} start`);
+                watches.set(watchId, { keysAsBytes, onEntries: entries => controller.enqueue(entries) });
+            },
+            pull(_controller) {
+                // noop
+            },
+            cancel() {
+                watches.delete(watchId);
+                if (debug) console.log(`watch: ${watchId} cancel`);
+            },
+        });
     }
 
     protected close_(): void {
