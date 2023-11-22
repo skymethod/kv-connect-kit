@@ -263,6 +263,7 @@ export abstract class BaseKv implements Kv {
     // deno-lint-ignore no-explicit-any
     watch<T>(keys: readonly KvKey[], options?: { raw?: boolean }): ReadableStream<any> {
         this.checkOpen('watch');
+        if (keys.length === 0) throw new Error('Provide at least one key to watch');
         keys.forEach(checkKeyNotEmpty);
         if (!(options === undefined || isRecord(options) && (options.raw === undefined || typeof options.raw === 'boolean'))) throw new Error(`Unexpected options: ${JSON.stringify(options)}`);
         const { raw } = options ?? {};

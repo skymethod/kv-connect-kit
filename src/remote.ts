@@ -3,12 +3,12 @@ import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchData
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, readValue, unpackVersionstamp } from './kv_util.ts';
+import { DecodeV8, EncodeV8, readValue } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
 import { encodeJson as encodeJsonWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
 import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch, WatchKeyOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { ProtoBasedKv } from './proto_based.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
@@ -162,6 +162,7 @@ class RemoteKv extends ProtoBasedKv {
             const stream = await fetchWatchStream(watchUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
             const reader = stream.getReader({ mode: 'byob' });
             try {
+                const lastValues: ([ unknown, string ] | undefined)[] = [];
                 while (true) {
                     const { done, value } = await reader.read(new Uint8Array(4));
                     if (done) {
@@ -188,13 +189,25 @@ class RemoteKv extends ProtoBasedKv {
                             }
                         }
                         if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`);
-                        const entries: KvEntryMaybe<unknown>[] = outputKeys.map((v, i) => {
+                        const initial = lastValues.length === 0;
+                        outputKeys.forEach((v, i) => {
                             const { changed, entryIfChanged } = v;
-                            if (!changed || entryIfChanged === undefined) return { key: keys[i], value: null, versionstamp: null };
-                            const { value: bytes, encoding } = entryIfChanged;
-                            const value = readValue(bytes, encoding, decodeV8);
-                            const versionstamp = encodeHex(entryIfChanged.versionstamp);
-                            return { key: keys[i], value, versionstamp };
+                            if (initial && !changed) throw new Error(`watch: Expect all values in first message: ${JSON.stringify(outputKeys)}`);
+                            if (!changed) return;
+                            if (entryIfChanged) {
+                                const { value: bytes, encoding } = entryIfChanged;
+                                const value = readValue(bytes, encoding, decodeV8);
+                                const versionstamp = encodeHex(entryIfChanged.versionstamp);
+                                lastValues[i] = [ value, versionstamp ];
+                            } else {
+                                lastValues[i] = undefined; // deleted
+                            }
+                        });
+                        const entries: KvEntryMaybe<unknown>[] = keys.map((key, i) => {
+                            const lastValue = lastValues[i];
+                            if (lastValue === undefined) return { key, value: null, versionstamp: null };
+                            const [ value, versionstamp ] = lastValue;
+                            return { key, value, versionstamp };
                         })
                         yield entries;
                     }

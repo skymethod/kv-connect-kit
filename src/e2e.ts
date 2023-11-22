@@ -322,20 +322,47 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
 
     // watch
     if (type === 'kck' && pathType === 'remote' && path.includes('/localhost')) { // TODO remove once deploy supports v3
-        const results: KvEntryMaybe<unknown>[][] = [];
-        const p = (async () => {
-            for await (const entries of kv.watch<[ string ]>([ [ 'w1' ] ])) {
-                results.push(entries);
-                break;
-            }
-        })();
+        const reader = kv.watch<[ string, string ]>([ [ 'w1' ], [ 'w2' ] ]).getReader();
         await kv.set([ 'w1' ], 'v1');
-        await p;
-        assertEquals(results.length, 1);
-        assertEquals(results[0].length, 1);
-        assertEquals(results[0][0].key, [ 'w1' ]);
-        assertEquals(results[0][0].value, 'v1');
-        assert(typeof results[0][0].versionstamp === 'string');
+        {
+            const { done, value: entries } = await reader.read();
+            assertFalse(done);
+            assertEquals(entries.length, 2);
+            assertEquals(entries[0].key, [ 'w1' ]);
+            assertEquals(entries[0].value, 'v1');
+            assert(typeof entries[0].versionstamp === 'string');
+            assertEquals(entries[1].key, [ 'w2' ]);
+            assertEquals(entries[1].value, null);
+            assertEquals(entries[1].value, null);
+        }
+        await kv.set([ 'w2' ], 'v2');
+        {
+            const { done, value: entries } = await reader.read();
+            assertFalse(done);
+            assertEquals(entries.length, 2);
+            assertEquals(entries[0].key, [ 'w1' ]);
+            assertEquals(entries[0].value, 'v1');
+            assert(typeof entries[0].versionstamp === 'string');
+            assertEquals(entries[1].key, [ 'w2' ]);
+            assertEquals(entries[1].value, 'v2');
+            assert(typeof entries[1].versionstamp === 'string');
+        }
+        await kv.delete([ 'w1' ]);
+        {
+            const { done, value: entries } = await reader.read();
+            assertFalse(done);
+            assertEquals(entries.length, 2);
+            assertEquals(entries[0].key, [ 'w1' ]);
+            assertEquals(entries[0].value, null);
+            assertEquals(entries[0].value, null);
+            assertEquals(entries[1].key, [ 'w2' ]);
+            assertEquals(entries[1].value, 'v2');
+            assert(typeof entries[1].versionstamp === 'string');
+        }
+
+        await reader.cancel();
+        const { done } = await reader.read();
+        assert(done);
     }
 
     // multiple mutations on the same key
