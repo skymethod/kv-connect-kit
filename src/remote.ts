@@ -147,10 +147,12 @@ class RemoteKv extends ProtoBasedKv {
     }
 
     protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        let readDisabled = false;
         async function* yieldResults(kv: RemoteKv) {
             const { metadata, debug, fetcher, maxRetries, decodeV8 } = kv;
             if (metadata.version < 3) throw new Error(`watch: Only supported in version 3 of the protocol or higher`);
-            const endpointUrl = await kv.locateEndpointUrl('eventual');
+
+            const endpointUrl = await kv.locateEndpointUrl('eventual', readDisabled); // force refetch if retrying after receiving read disabled
             const watchUrl = `${endpointUrl}/watch`;
             const accessToken = metadata.token;
             const req: Watch = {
@@ -163,7 +165,7 @@ class RemoteKv extends ProtoBasedKv {
                 while (true) {
                     const { done, value } = await reader.read(new Uint8Array(4));
                     if (done) {
-                        if (debug) console.log(`done! returning`);
+                        if (debug) console.log(`watch: done! returning`);
                         return;
                     }
                     const n = new DataView(value.buffer).getInt32(0, true);
@@ -176,7 +178,16 @@ class RemoteKv extends ProtoBasedKv {
                         }
                         const output = decodeWatchOutput(value);
                         const { status, keys: outputKeys } = output;
-                        if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`); // TODO retry on READ_DISABLED
+                        if (status === 'SR_READ_DISABLED') {
+                            if (!readDisabled) {
+                                readDisabled = true; // retry in the next go-around
+                                if (debug) console.log(`watch: received SR_READ_DISABLED, retry after refreshing metadata`);
+                                return;
+                            } else {
+                                throw new Error(`watch: Read disabled after retry`);
+                            }
+                        }
+                        if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`);
                         const entries: KvEntryMaybe<unknown>[] = outputKeys.map((v, i) => {
                             const { changed, entryIfChanged } = v;
                             if (!changed || entryIfChanged === undefined) return { key: keys[i], value: null, versionstamp: null };
@@ -193,7 +204,18 @@ class RemoteKv extends ProtoBasedKv {
             }
         }
 
-        return ReadableStream.from(yieldResults(this))
+        async function* yieldResultsLoop(kv: RemoteKv) {
+            for await (const entries of yieldResults(kv)) {
+                yield entries;
+            }
+            if (readDisabled) {
+                // retry and refetch metadata
+                for await (const entries of yieldResults(kv)) {
+                    yield entries;
+                }
+            }
+        }
+        return ReadableStream.from(yieldResultsLoop(this))
     }
 
     protected close_(): void {
@@ -236,9 +258,9 @@ class RemoteKv extends ProtoBasedKv {
 
     //
 
-    private async locateEndpointUrl(consistency: KvConsistencyLevel): Promise<string> {
+    private async locateEndpointUrl(consistency: KvConsistencyLevel, forceRefetch = false): Promise<string> {
         const { url, accessToken, debug, fetcher, maxRetries, supportedVersions } = this;
-        if (computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
+        if (forceRefetch || computeExpiresInMillis(this.metadata) < 1000 * 60 * 5) {
             this.metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         }
         const { metadata } = this;
