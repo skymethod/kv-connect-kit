@@ -228,7 +228,18 @@ class RemoteKv extends ProtoBasedKv {
                 }
             }
         }
-        return ReadableStream.from(yieldResultsLoop(this))
+        // return ReadableStream.from(yieldResultsLoop(this)); // not supported by dnt/node
+        const generator = yieldResultsLoop(this);
+        return new ReadableStream({
+            async pull(controller) {
+                const { done, value } = await generator.next();
+                if (done || value === undefined) return;
+                controller.enqueue(value);
+            },
+            async cancel() {
+                await generator.return();
+            },
+        });
     }
 
     protected close_(): void {

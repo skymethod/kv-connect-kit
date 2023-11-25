@@ -14,8 +14,10 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
     const debug = opts.debug === true;
 
     // use built-in native implementation if available when running on Deno
-    if ('Deno' in globalThis && 'openKv' in globalThis.Deno && typeof globalThis.Deno.openKv === 'function') {
-        return makeNativeService();
+    if ('Deno' in globalThis) {
+        // deno-lint-ignore no-explicit-any
+        const { openKv } = (globalThis as any).Deno;
+        if (typeof openKv === 'function') return makeNativeService();
     }
 
     // use in-memory implementation if no path provided
