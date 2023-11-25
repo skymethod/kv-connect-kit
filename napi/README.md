@@ -11,16 +11,9 @@
 |                  | node18 | node20 |
 | ---------------- | ------ | ------ |
 | Windows x64      | ✓      | ✓      |
-| Windows x32      | ✓      | ✓      |
-| Windows arm64    | ✓      | ✓      |
 | macOS x64        | ✓      | ✓      |
 | macOS arm64      | ✓      | ✓      |
 | Linux x64 gnu    | ✓      | ✓      |
-| Linux x64 musl   | ✓      | ✓      |
-| Linux arm gnu    | ✓      | ✓      |
-| Linux arm64 gnu  | ✓      | ✓      |
-| Linux arm64 musl | ✓      | ✓      |
-| FreeBSD x64      | ✓      | ✓      |
 
 
 # Development
