@@ -1,6 +1,7 @@
 import { makeInMemoryService } from './in_memory.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { isNapiInterface, makeNapiBasedService } from './napi_based.ts';
+import { makeNativeService } from './native.ts';
 import { makeRemoteService } from './remote.ts';
 
 export * from './napi_based.ts';
@@ -12,6 +13,12 @@ export { UnknownV8 } from './v8.ts';
 export async function openKv(path?: string, opts: Record<string, unknown> & { debug?: boolean } = {}) {
     const debug = opts.debug === true;
 
+    // use built-in native implementation if available when running on Deno
+    if ('Deno' in globalThis && 'openKv' in globalThis.Deno && typeof globalThis.Deno.openKv === 'function') {
+        return makeNativeService();
+    }
+
+    // use in-memory implementation if no path provided
     if (path === undefined || path === '') return await makeInMemoryService({ debug }).openKv(path);
     
     const { encodeV8, decodeV8 } = await (async () => {
@@ -31,12 +38,15 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
         return { encodeV8: serialize as EncodeV8, decodeV8: deserialize as DecodeV8 };
     })();
 
+    // use remote implementation if path looks like a url
     if (/^https?:\/\//i.test(path)) {
         // deno-lint-ignore no-explicit-any
         const accessToken = (globalThis as any)?.process?.env?.DENO_KV_ACCESS_TOKEN;
         if (typeof accessToken !== 'string') throw new Error(`Set the DENO_KV_ACCESS_TOKEN to your access token`);
         return await makeRemoteService({ debug, accessToken, encodeV8, decodeV8 }).openKv(path);
     }
+
+    // else use the napi implementation
     const { napi } = opts;
     if (!isNapiInterface(napi)) throw new Error(`Provide the napi interface for sqlite`);
     return await makeNapiBasedService({ debug, encodeV8, decodeV8, napi }).openKv(path);
