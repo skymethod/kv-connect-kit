@@ -1,11 +1,14 @@
 import { isRecord } from './check.ts';
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
-import { KvConsistencyLevel, KvService, KvU64 } from './kv_types.ts';
+import { packKey } from './kv_key.ts';
+import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { ProtoBasedKv } from './proto_based.ts';
 import { encodeV8 } from './v8.ts';
+import { encodeBinary as encodeWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
+import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
 
 export interface NapiBasedServiceOptions {
 
@@ -34,6 +37,9 @@ export interface NapiInterface {
     atomicWrite(dbId: number, atomicWriteBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
     dequeueNextMessage(dbId: number, debug: boolean): Promise<{ bytes: Uint8Array, messageId: number } | undefined>;
     finishMessage(dbId: number, messageId: number, success: boolean, debug: boolean): Promise<void>;
+    startWatch?(dbId: number, watchBytes: Uint8Array, debug: boolean): Promise<number>;
+    dequeueNextWatchMessage?(dbId: number, watchId: number, debug: boolean): Promise<Uint8Array | undefined>;
+    endWatch?(dbId: number, watchId: number, debug: boolean): void;
 }
 
 export function isNapiInterface(obj: unknown): obj is NapiInterface {
@@ -42,6 +48,11 @@ export function isNapiInterface(obj: unknown): obj is NapiInterface {
         && typeof obj.close === 'function'
         && typeof obj.snapshotRead === 'function'
         && typeof obj.atomicWrite === 'function'
+        && typeof obj.dequeueNextMessage === 'function'
+        && typeof obj.finishMessage === 'function'
+        && (obj.startWatch === undefined || typeof obj.startWatch === 'function')
+        && (obj.dequeueNextWatchMessage === undefined || typeof obj.dequeueNextWatchMessage === 'function')
+        && (obj.endWatch === undefined || typeof obj.endWatch === 'function')
         ;
 }
 
@@ -100,6 +111,43 @@ class NapiBasedKv extends ProtoBasedKv {
         const { napi, dbId, debug } = this;
         const res = await napi.atomicWrite(dbId, encodeAtomicWrite(req), debug);
         return decodeAtomicWriteOutput(res);
+    }
+
+    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        const { napi, dbId, debug } = this;
+        const { startWatch, dequeueNextWatchMessage, endWatch } = napi;
+        if (startWatch === undefined || dequeueNextWatchMessage === undefined || endWatch === undefined) {
+            throw new Error('watch: not implemented');
+        }
+
+        const watch: Watch = {
+            keys: keys.map(v => ({ key: packKey(v) })),
+        };
+
+        let watchId = -1;
+        return new ReadableStream({
+            start(_controller) {
+                (async () => {
+                    watchId = await startWatch(dbId,  encodeWatch(watch), debug);
+
+                    while (true) {
+                        const watchOutputBytes = await dequeueNextWatchMessage(dbId, watchId, debug);
+                        if (watchOutputBytes === undefined) return;
+                        const watchOutput = decodeWatchOutput(watchOutputBytes);
+                        if (debug) console.log(`watch: received ${JSON.stringify(watchOutput)}`);
+                        // TODO enqueue KvEntryMaybe, similar to remote
+                    }
+                })();
+            },
+            pull(_controller) {
+                // noop
+            },
+            cancel() {
+                if (watchId > -1) {
+                    endWatch(dbId, watchId, debug);
+                }
+            },
+        });
     }
 
 }

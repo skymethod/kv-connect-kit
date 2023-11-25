@@ -20,6 +20,7 @@ export { encodeAtomicWrite, encodeSnapshotRead, decodeSnapshotReadOutput, decode
 
 // VERSION 3
 // https://github.com/denoland/denokv/blob/b27fdc1a1a148ab9590c5eff4d2430aa6ee075b4/proto/kv-connect.md
+// https://github.com/denoland/denokv/blob/b27fdc1a1a148ab9590c5eff4d2430aa6ee075b4/proto/schema/datapath.proto
 
 export type KvConnectProtocolVersion = 1 | 2 | 3;
 
