@@ -32,6 +32,7 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
             if (typeof decodeV8 !== 'function') throw new Error(`Unexpected 'decodeV8': ${decodeV8}`);
             return { encodeV8: encodeV8 as EncodeV8, decodeV8: decodeV8 as DecodeV8 };
         }
+        if ('Bun' in globalThis) throw new Error(`Bun provides v8.serialize/deserialize, but it uses JavaScriptCore's format.  Provide an explicit 'encodeV8' and 'decodeV8' via options.`); // https://discord.com/channels/876711213126520882/888937948345684008/1150135641137487892
         const v8 = await import(`${'v8'}`);
         if (!v8) throw new Error(`Unable to import the v8 module`);
         const { serialize, deserialize } = v8;
