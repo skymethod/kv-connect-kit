@@ -15,7 +15,7 @@ export interface NapiBasedServiceOptions {
     /** Enable some console logging */
     readonly debug?: boolean;
 
-    readonly napi: NapiInterface;
+    readonly napi?: NapiInterface;
 
     readonly decodeV8: DecodeV8;
     readonly encodeV8: EncodeV8;
@@ -42,21 +42,16 @@ export interface NapiInterface {
     endWatch?(dbId: number, watchId: number, debug: boolean): void;
 }
 
+export const NAPI_FUNCTIONS = [ 'open', 'close', 'snapshotRead', 'atomicWrite', 'dequeueNextMessage', 'finishMessage' ];
+
 export function isNapiInterface(obj: unknown): obj is NapiInterface {
-    return isRecord(obj) 
-        && typeof obj.open === 'function'
-        && typeof obj.close === 'function'
-        && typeof obj.snapshotRead === 'function'
-        && typeof obj.atomicWrite === 'function'
-        && typeof obj.dequeueNextMessage === 'function'
-        && typeof obj.finishMessage === 'function'
-        && (obj.startWatch === undefined || typeof obj.startWatch === 'function')
-        && (obj.dequeueNextWatchMessage === undefined || typeof obj.dequeueNextWatchMessage === 'function')
-        && (obj.endWatch === undefined || typeof obj.endWatch === 'function')
-        ;
+    return isRecord(obj) && NAPI_FUNCTIONS.every(v => typeof obj[v] === 'function');
 }
 
 //
+
+// deno-lint-ignore no-explicit-any
+const DEFAULT_NAPI_INTERFACE: any = undefined;
 
 class NapiBasedKv extends ProtoBasedKv {
 
@@ -70,8 +65,9 @@ class NapiBasedKv extends ProtoBasedKv {
     }
 
     static of(url: string | undefined, opts: NapiBasedServiceOptions): NapiBasedKv {
-        const { debug = false, napi, decodeV8 } = opts;
+        const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8 } = opts;
         if (typeof url !== 'string' || /^https?:\/\//i.test(url)) throw new Error(`Invalid path: ${url}`);
+        if (napi === undefined) throw new Error(`No default napi interface, provide one via the 'napi' option.`);
         const dbId = napi.open(url, debug);
         return new NapiBasedKv(debug, napi, dbId, decodeV8, encodeV8);
     }
