@@ -146,8 +146,10 @@ class RemoteKv extends ProtoBasedKv {
         throw new Error(`'listenQueue' is not possible over KV Connect`);
     }
 
-    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+    protected watch_(keys: readonly KvKey[], raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        if (!raw) throw new Error(`Only raw: true is supported`);
         let readDisabled = false;
+        let reader: ReadableStreamBYOBReader | undefined;
         async function* yieldResults(kv: RemoteKv) {
             const { metadata, debug, fetcher, maxRetries, decodeV8 } = kv;
             if (metadata.version < 3) throw new Error(`watch: Only supported in version 3 of the protocol or higher`);
@@ -160,7 +162,7 @@ class RemoteKv extends ProtoBasedKv {
             }
             if (debug) console.log(`watch: ${watchToString(req)}`);
             const stream = await fetchWatchStream(watchUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
-            const reader = stream.getReader({ mode: 'byob' });
+            reader = stream.getReader({ mode: 'byob' });
             try {
                 const lastValues: ([ unknown, string ] | undefined)[] = [];
                 while (true) {
@@ -208,12 +210,13 @@ class RemoteKv extends ProtoBasedKv {
                             if (lastValue === undefined) return { key, value: null, versionstamp: null };
                             const [ value, versionstamp ] = lastValue;
                             return { key, value, versionstamp };
-                        })
+                        });
                         yield entries;
                     }
                 }
             } finally {
                 await reader.cancel();
+                reader = undefined;
             }
         }
 
@@ -237,7 +240,7 @@ class RemoteKv extends ProtoBasedKv {
                 controller.enqueue(value);
             },
             async cancel() {
-                await generator.return();
+                await reader?.cancel();
             },
         });
     }
