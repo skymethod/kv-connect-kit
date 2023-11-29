@@ -1,8 +1,8 @@
-import { Deferred, deferred } from 'https://deno.land/std@0.207.0/async/deferred.ts';
 import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn, isRecord, checkMatches } from './check.ts';
 import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
+import { Deferred, defer } from './proto/runtime/async/observer.ts';
 import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
 
 export type EncodeV8 = (value: unknown) => Uint8Array;
@@ -359,7 +359,7 @@ export class QueueWorker {
     listen(handler: QueueHandler): Promise<void> {
         if (this.queueHandler) throw new Error(`Already called 'listenQueue'`); // for now
         this.queueHandler = handler;
-        const rt = deferred<void>();
+        const rt = defer<void>();
         this.queueHandlerPromise = rt;
         this.rescheduleWorker();
         return rt;

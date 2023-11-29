@@ -6,6 +6,7 @@ export function decodeV8(bytes: Uint8Array, { wrapUnknownValues = false }: { wra
     if (bytes.length === 0) throw new Error(`decode error: empty input`);
     let pos = 0;
     const kVersion = bytes[pos++];
+    if (kVersion !== SerializationTag.kVersion && wrapUnknownValues) return new UnknownV8(bytes);
     if (kVersion !== SerializationTag.kVersion) throw new Error(`decode error: Unsupported kVersion ${kVersion} [${[...bytes].join(', ')}]`);
     const version = bytes[pos++];
     if (version !== kLatestVersion) throw new Error(`decode error: Unsupported version ${version}`);
