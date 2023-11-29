@@ -367,6 +367,30 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
             await reader.cancel();
             const { done } = await reader.read();
             assert(done);
+            await kv.delete([ 'w2' ]);
+        }
+        {
+            // raw=false
+            const reader = kv.watch<[ string, string ]>([ [ 'w1' ], [ 'w2' ] ], { raw: false }).getReader();
+            await kv.set([ 'w1' ], 'v1');
+            await kv.set([ 'w2' ], 'v2');
+            await kv.delete([ 'w1' ]);
+            if (pathType === 'remote') await sleep(100); // give remote time to apply changes
+            {
+                const { done, value: entries } = await reader.read();
+                assertFalse(done);
+                assertEquals(entries.length, 2);
+                assertEquals(entries[0].key, [ 'w1' ]);
+                assertEquals(entries[0].value, null);
+                assertEquals(entries[0].value, null);
+                assertEquals(entries[1].key, [ 'w2' ]);
+                assertEquals(entries[1].value, 'v2');
+                assert(typeof entries[1].versionstamp === 'string');
+            }
+
+            await reader.cancel();
+            const { done } = await reader.read();
+            assert(done);
         }
     }
 

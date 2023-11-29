@@ -5,6 +5,7 @@ import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { BaseKv, CursorHolder, Enqueue, Expirer, QueueHandler, QueueWorker, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
+import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 
 export interface InMemoryServiceOptions {
 
@@ -47,7 +48,7 @@ const copyValueIfNecessary = (v: unknown) => v instanceof _KvU64 ? v : structure
 
 type QueueItem = { id: number, value: unknown, enqueued: number, available: number, failures: number, keysIfUndelivered: KvKey[], locked: boolean };
 
-type Watch = { keysAsBytes: Uint8Array[], onEntries: (entries: KvEntryMaybe<unknown>[]) => void };
+type Watch = { keysAsBytes: Uint8Array[], onEntries: (entries: KvEntryMaybe<unknown>[]) => void, onFinalize: () => void };
 
 class InMemoryKv extends BaseKv {
 
@@ -188,28 +189,30 @@ class InMemoryKv extends BaseKv {
         return { ok: true, versionstamp: newVersionstamp };
     }
 
-    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+    protected watch_(keys: readonly KvKey[], raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
         const { watches, debug } = this;
         const keysAsBytes = keys.map(packKey);
         const watchId = [...watches.keys()].reduce((a, b) => Math.max(a, b), 0) + 1;
-        return new ReadableStream({
+        let onCancel: (() => void) | undefined;
+        const rawStream = new ReadableStream({
             start(controller) {
                 if (debug) console.log(`watch: ${watchId} start`);
-                watches.set(watchId, { keysAsBytes, onEntries: entries => controller.enqueue(entries) });
-            },
-            pull(_controller) {
-                // noop
+                const tryClose = () => { try { controller.close() } catch { /* noop */ } };
+                onCancel = tryClose;
+                watches.set(watchId, { keysAsBytes, onEntries: entries => controller.enqueue(entries), onFinalize: tryClose });
             },
             cancel() {
                 watches.delete(watchId);
                 if (debug) console.log(`watch: ${watchId} cancel`);
             },
         });
+        return raw ? rawStream : makeUnrawWatchStream(rawStream, onCancel!);
     }
 
     protected close_(): void {
         this.expirer.finalize();
         this.queueWorker.finalize();
+        this.watches.forEach(v => v.onFinalize());
     }
 
     //

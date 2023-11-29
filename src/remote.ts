@@ -10,6 +10,7 @@ import { encodeJson as encodeJsonWatch } from './proto/messages/com/deno/kv/data
 import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { ProtoBasedKv } from './proto_based.ts';
+import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
 type Fetcher = typeof fetch;
@@ -109,6 +110,8 @@ function watchToString(req: Watch): string {
     return JSON.stringify(encodeJsonWatch(req));
 }
 
+type WatchRecord = { onFinalize: () => void };
+
 //
 
 class RemoteKv extends ProtoBasedKv {
@@ -118,6 +121,7 @@ class RemoteKv extends ProtoBasedKv {
     private readonly fetcher: Fetcher;
     private readonly maxRetries: number;
     private readonly supportedVersions: KvConnectProtocolVersion[];
+    private readonly watches = new Map<number, WatchRecord>();
 
     private metadata: DatabaseMetadata;
 
@@ -147,7 +151,8 @@ class RemoteKv extends ProtoBasedKv {
     }
 
     protected watch_(keys: readonly KvKey[], raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
-        if (!raw) throw new Error(`Only raw: true is supported`);
+        const { watches } = this;
+        const watchId = [...watches.keys()].reduce((a, b) => Math.max(a, b), 0) + 1;
         let readDisabled = false;
         let reader: ReadableStreamBYOBReader | undefined;
         async function* yieldResults(kv: RemoteKv) {
@@ -233,20 +238,26 @@ class RemoteKv extends ProtoBasedKv {
         }
         // return ReadableStream.from(yieldResultsLoop(this)); // not supported by dnt/node
         const generator = yieldResultsLoop(this);
-        return new ReadableStream({
+        const cancelReaderIfNecessary = async () => {
+            await reader?.cancel();
+            reader = undefined;
+        }
+        watches.set(watchId, { onFinalize: cancelReaderIfNecessary });
+        const rawStream = new ReadableStream({
             async pull(controller) {
                 const { done, value } = await generator.next();
                 if (done || value === undefined) return;
                 controller.enqueue(value);
             },
             async cancel() {
-                await reader?.cancel();
+                await cancelReaderIfNecessary();
             },
         });
+        return raw ? rawStream : makeUnrawWatchStream(rawStream, async () => await cancelReaderIfNecessary());
     }
 
     protected close_(): void {
-        // no persistent resources yet
+        [...this.watches.values()].forEach(v => v.onFinalize());
     }
 
     protected async snapshotRead(req: SnapshotRead, consistency: KvConsistencyLevel = 'strong'): Promise<SnapshotReadOutput> {
