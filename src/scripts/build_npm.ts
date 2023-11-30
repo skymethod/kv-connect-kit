@@ -31,7 +31,7 @@ await build({
     },
     package: {
         // package.json properties
-        name: 'kv-connect-kit',
+        name: napi?.packageName ?? 'kv-connect-kit',
         version,
         description: 'Minimal Typescript client implementing the KV Connect protocol. Connect to Deno KV remotely from Node, Cloudflare Workers, Bun, Deno, and the browser.',
         license: 'MIT',

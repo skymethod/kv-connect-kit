@@ -17,4 +17,4 @@ curl -fsSL https://deno.land/x/install/install.sh | DENO_INSTALL=./deno-$DENO_VE
 NO_COLOR=1 ./deno-$DENO_VERSION/bin/deno test --allow-read --allow-write --unstable
 
 # build root package, then publish it (and native subpackages)
-NO_COLOR=1 ./deno-$DENO_VERSION/bin/deno run --unstable --allow-all ./src/scripts/build_npm.ts $VERSION --napi=$VERSION --publish=$(which npm) --dry-run
+NO_COLOR=1 ./deno-$DENO_VERSION/bin/deno run --unstable --allow-all ./src/scripts/build_npm.ts $VERSION --napi=$VERSION --publish=$(which npm)
