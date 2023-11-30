@@ -14,10 +14,18 @@ export interface NapiBasedServiceOptions {
     /** Enable some console logging */
     readonly debug?: boolean;
 
+    /** Underlying native napi interface */
     readonly napi?: NapiInterface;
 
-    readonly decodeV8: DecodeV8;
+    /** Custom serializer to use when serializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'serialize' function in Node's 'v8' module. */
     readonly encodeV8: EncodeV8;
+
+    /** Custom deserializer to use when deserializing v8-encoded KV values.
+     * 
+     * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
+    readonly decodeV8: DecodeV8;
 
 }
 

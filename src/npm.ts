@@ -21,7 +21,10 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
     }
 
     // use in-memory implementation if no path provided
-    if (path === undefined || path === '') return await makeInMemoryService({ debug }).openKv(path);
+    if (path === undefined || path === '') {
+        const maxQueueAttempts = typeof opts.maxQueueAttempts === 'number' ? opts.maxQueueAttempts : undefined;
+        return await makeInMemoryService({ debug, maxQueueAttempts }).openKv(path);
+    }
     
     const { encodeV8, decodeV8 } = await (async () => {
         const { encodeV8, decodeV8 } = opts;
@@ -43,10 +46,17 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
 
     // use remote implementation if path looks like a url
     if (/^https?:\/\//i.test(path)) {
-        // deno-lint-ignore no-explicit-any
-        const accessToken = (globalThis as any)?.process?.env?.DENO_KV_ACCESS_TOKEN;
-        if (typeof accessToken !== 'string') throw new Error(`Set the DENO_KV_ACCESS_TOKEN to your access token`);
-        return await makeRemoteService({ debug, accessToken, encodeV8, decodeV8 }).openKv(path);
+        let accessToken = typeof opts.accessToken === 'string' && opts.accessToken !== '' ? opts.accessToken : undefined;
+        if (accessToken === undefined) {
+            // deno-lint-ignore no-explicit-any
+            accessToken = (globalThis as any)?.process?.env?.DENO_KV_ACCESS_TOKEN;
+            if (typeof accessToken !== 'string') throw new Error(`Set the DENO_KV_ACCESS_TOKEN to your access token`);
+        }
+        const fetcher = typeof opts.fetcher === 'function' ? opts.fetcher as typeof fetch : undefined;
+        const maxRetries = typeof opts.maxRetries === 'number' ? opts.maxRetries : undefined;
+        const wrapUnknownValues = typeof opts.wrapUnknownValues === 'boolean' ? opts.wrapUnknownValues : undefined;
+        const supportedVersions = Array.isArray(opts.supportedVersions) && opts.supportedVersions.every(v => typeof v === 'number') ? opts.supportedVersions : undefined;
+        return await makeRemoteService({ debug, accessToken, encodeV8, decodeV8, fetcher, maxRetries, supportedVersions, wrapUnknownValues }).openKv(path);
     }
 
     // else use the napi implementation
