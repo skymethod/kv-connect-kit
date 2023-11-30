@@ -11,12 +11,16 @@ export function makeUnrawWatchStream(rawWatchStream: ReadableStream<KvEntryMaybe
     return new ReadableStream({
         start(controller) {
             (async () => {
-                for await (const entries of rawWatchStream) {
+                const reader = rawWatchStream.getReader();
+                while (true) {
+                    const { done, value: entries } = await reader.read();
+                    if (done) break;
                     if (cancelled) break;
                     latest = entries;
                     signal.resolve();
                     signal = defer<void>();
                 }
+                await reader.cancel();
                 signal.resolve();
                 try { controller.close(); } catch { /* noop */ };
             })();

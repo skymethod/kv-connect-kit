@@ -2,11 +2,17 @@ import { join } from 'https://deno.land/std@0.208.0/path/join.ts';
 import { LibName, build, emptyDir } from 'https://deno.land/x/dnt@0.39.0/mod.ts';
 import { parseArgs as parseFlags } from 'https://deno.land/std@0.208.0/cli/parse_args.ts';
 import { generateNapiIndex } from './generate_napi_index.ts';
+import { run } from './process.ts';
 
 const flags = parseFlags(Deno.args);
 const tests = !!flags.tests;
 if (tests) console.log('including tests!');
+const publish = typeof flags.publish === 'string' ? flags.publish : undefined;
+const dryrun = !!flags['dry-run'];
+if (publish) console.log(`publish${dryrun ? ` (dryrun)`: ''} after build! (npm=${publish})`);
 const napi = typeof flags.napi === 'string' ? { packageName: '@skymethod/kv-connect-kit-napi', packageVersion: flags.napi, artifactName: 'kv-connect-kit-napi' } : undefined;
+const version = Deno.args[0];
+if (typeof version !== 'string' || !/^[a-z0-9.-]+$/.test(version)) throw new Error(`Unexpected version: ${version}`);
 
 const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
 await emptyDir(outDir);
@@ -26,7 +32,7 @@ await build({
     package: {
         // package.json properties
         name: 'kv-connect-kit',
-        version: Deno.args[0],
+        version,
         description: 'Minimal Typescript client implementing the KV Connect protocol. Connect to Deno KV remotely from Node, Cloudflare Workers, Bun, Deno, and the browser.',
         license: 'MIT',
         repository: {
@@ -59,5 +65,34 @@ await build({
         }
     },
 });
+
+if (publish) {
+    const updatePackageJsonVersion = async (path: string, version: string) => {
+        console.log(`Updating ${path} version to ${version}`);
+        const packageJson = await Deno.readTextFile(path);
+        const newPackageJson = packageJson.replace(/("version"\s*:\s*")[0-9a-z.-]+"/, `$1${version}"`);
+        if (packageJson === newPackageJson) throw new Error(`Unable to replace version!`);
+        await Deno.writeTextFile(path, newPackageJson);
+    }
+    const npmPublish = async (path: string) => {
+        const next = !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version);
+        const out = await run({
+            command: publish,
+            args: [ 'publish', '--access', 'public', ...(next ? [ '--tag', 'next' ] : []), ...(dryrun ? [ '--dry-run' ] : []), path ],
+        });
+        console.log(out);
+    }
+
+    if (napi) {
+        // first, publish the native subpackages
+        for (const { name: subdir } of (await Array.fromAsync(Deno.readDir('napi/npm'))).filter(v => v.isDirectory)) {
+            const path = join('napi', 'npm', subdir, 'package.json');
+            await updatePackageJsonVersion(path, version);
+            await npmPublish(join('napi', 'npm', subdir));
+        }
+    }
+    // finally, publish the root package
+    await npmPublish(outDir);
+}
 
 console.log(outDir);
