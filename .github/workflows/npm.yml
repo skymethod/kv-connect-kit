@@ -11,6 +11,7 @@ env:
       - '**'
     paths:
       - '.github/workflows/*.yml'
+      - '.github/*.sh'
       - 'napi/**'
       - '!napi/**/*.md'
       - '!napi/LICENSE'
