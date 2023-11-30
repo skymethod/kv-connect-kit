@@ -10,9 +10,12 @@ if (tests) console.log('including tests!');
 const publish = typeof flags.publish === 'string' ? flags.publish : undefined;
 const dryrun = !!flags['dry-run'];
 if (publish) console.log(`publish${dryrun ? ` (dryrun)`: ''} after build! (npm=${publish})`);
-const napi = typeof flags.napi === 'string' ? { packageName: '@skymethod/kv-connect-kit-napi', packageVersion: flags.napi, artifactName: 'kv-connect-kit-napi' } : undefined;
-const version = Deno.args[0];
+const stripLeadingV = (version: string) => version.replace(/^v/, '');
+const napi = typeof flags.napi === 'string' ? { packageName: '@skymethod/kv-connect-kit-napi', packageVersion: stripLeadingV(flags.napi), artifactName: 'kv-connect-kit-napi' } : undefined;
+if (napi) console.log(`napi: ${JSON.stringify(napi)}`);
+const version = typeof Deno.args[0] === 'string' ? stripLeadingV(Deno.args[0]) : Deno.args[0];
 if (typeof version !== 'string' || !/^[a-z0-9.-]+$/.test(version)) throw new Error(`Unexpected version: ${version}`);
+console.log(`version=${version}`);
 
 const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
 await emptyDir(outDir);
