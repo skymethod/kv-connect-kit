@@ -11,15 +11,25 @@ export class _KvU64 {
     }
 
     sum(other: { readonly value: bigint }): _KvU64 {
+        checkValueHolder(other);
         return new _KvU64((this.value + other.value) % (1n << 64n));
     }
 
     min(other: { readonly value: bigint }): _KvU64 {
+        checkValueHolder(other);
         return other.value < this.value ? new _KvU64(other.value) : this;
     }
 
     max(other: { readonly value: bigint }): _KvU64 {
+        checkValueHolder(other);
         return other.value > this.value ? new _KvU64(other.value) : this;
     }
 
+}
+
+//
+
+function checkValueHolder(obj: unknown) {
+    const valid = typeof obj === 'object' && obj !== null && !Array.isArray(obj) && 'value' in obj && typeof obj.value === 'bigint';
+    if (!valid) throw new Error(`Expected bigint holder, found: ${obj}`);
 }

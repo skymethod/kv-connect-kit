@@ -37,6 +37,8 @@ export function decodeV8(bytes: Uint8Array, { wrapUnknownValues = false }: { wra
     } else if (tag === SerializationTag.kFalse) {
         checkEnd(bytes, pos);
         return false;
+    } else if (tag === SerializationTag.kBigInt && bytes.length === 4 && bytes[3] === 0) {
+        return 0n;
     // } else if (tag === SerializationTag.kBigInt) {
     //     const len = bytes[pos++];
     //     if (len !== 16) throw new Error(`Unsupported`);
@@ -77,6 +79,8 @@ export function encodeV8(value: unknown): Uint8Array {
         return new Uint8Array([ SerializationTag.kVersion, kLatestVersion, SerializationTag.kTrue ]);
     } else if (value === false) {
         return new Uint8Array([ SerializationTag.kVersion, kLatestVersion, SerializationTag.kFalse ]);
+    } else if (value === 0n) {
+        return new Uint8Array([ SerializationTag.kVersion, kLatestVersion, SerializationTag.kBigInt, 0 ]);
     // } else if (typeof value === 'bigint') {
     //     const bytes = new Uint8Array(8);
     //     new DataView(bytes.buffer).setBigInt64(0, value, true);

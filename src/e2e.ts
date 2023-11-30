@@ -421,6 +421,15 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assertSameBigintHolder((await kv.get(k1)).value, 50n);
     }
 
+    // set(bigint).sum(bigint) should throw to match current native behavior
+    {
+        const k1 = [ 'k1' ];
+        assertRejects(() => kv.atomic().delete(k1).set(k1, 0n).sum(k1, 2n).commit());
+
+        await kv.set(k1, 0n);
+        assertRejects(() => kv.atomic().sum(k1, 2n).commit());
+    }
+
     // close
     kv.close();
 
