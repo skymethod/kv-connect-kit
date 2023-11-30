@@ -322,7 +322,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     }
 
     // watch
-    if (subtype === 'in-memory' || type === 'kck' && pathType === 'remote' && path.includes('/localhost')) { // TODO remove once deploy supports v3
+    if (subtype === 'in-memory' || type === 'kck' && pathType === 'remote'/* && path.includes('/localhost')*/) { // TODO remove once deploy supports v3
         {
             // raw=true
             const reader = kv.watch<[ string, string ]>([ [ 'w1' ], [ 'w2' ] ], { raw: true }).getReader();

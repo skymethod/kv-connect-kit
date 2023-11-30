@@ -63,7 +63,7 @@ class NapiBasedKv extends ProtoBasedKv {
     }
 
     static of(url: string | undefined, opts: NapiBasedServiceOptions): NapiBasedKv {
-        const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8 } = opts;
+        const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8, encodeV8 } = opts;
         if (typeof url !== 'string' || /^https?:\/\//i.test(url)) throw new Error(`Invalid path: ${url}`);
         if (napi === undefined) throw new Error(`No default napi interface, provide one via the 'napi' option.`);
         const dbId = napi.open(url, debug);
