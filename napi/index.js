@@ -234,7 +234,17 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { open, close, snapshotRead, atomicWrite, dequeueNextMessage, finishMessage } = nativeBinding
+const {
+  open,
+  close,
+  snapshotRead,
+  atomicWrite,
+  dequeueNextMessage,
+  finishMessage,
+  startWatch,
+  dequeueNextWatchMessage,
+  endWatch,
+} = nativeBinding
 
 module.exports.open = open
 module.exports.close = close
@@ -242,3 +252,6 @@ module.exports.snapshotRead = snapshotRead
 module.exports.atomicWrite = atomicWrite
 module.exports.dequeueNextMessage = dequeueNextMessage
 module.exports.finishMessage = finishMessage
+module.exports.startWatch = startWatch
+module.exports.dequeueNextWatchMessage = dequeueNextWatchMessage
+module.exports.endWatch = endWatch

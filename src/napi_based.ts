@@ -35,12 +35,12 @@ export interface NapiInterface {
     atomicWrite(dbId: number, atomicWriteBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
     dequeueNextMessage(dbId: number, debug: boolean): Promise<{ bytes: Uint8Array, messageId: number } | undefined>;
     finishMessage(dbId: number, messageId: number, success: boolean, debug: boolean): Promise<void>;
-    startWatch?(dbId: number, watchBytes: Uint8Array, debug: boolean): Promise<number>;
-    dequeueNextWatchMessage?(dbId: number, watchId: number, debug: boolean): Promise<Uint8Array | undefined>;
-    endWatch?(dbId: number, watchId: number, debug: boolean): void;
+    startWatch(dbId: number, watchBytes: Uint8Array, debug: boolean): Promise<number>;
+    dequeueNextWatchMessage(dbId: number, watchId: number, debug: boolean): Promise<Uint8Array | undefined>;
+    endWatch(dbId: number, watchId: number, debug: boolean): void;
 }
 
-export const NAPI_FUNCTIONS = [ 'open', 'close', 'snapshotRead', 'atomicWrite', 'dequeueNextMessage', 'finishMessage' ];
+export const NAPI_FUNCTIONS = [ 'open', 'close', 'snapshotRead', 'atomicWrite', 'dequeueNextMessage', 'finishMessage', 'startWatch', 'dequeueNextWatchMessage', 'endWatch' ];
 
 export function isNapiInterface(obj: unknown): obj is NapiInterface {
     return isRecord(obj) && NAPI_FUNCTIONS.every(v => typeof obj[v] === 'function');

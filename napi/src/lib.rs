@@ -1,9 +1,9 @@
 #![deny(clippy::all)]
 use denokv_proto::ConvertError;
-// use denokv_proto::datapath::SnapshotReadStatus; // TODO watch
+// use denokv_proto::datapath::SnapshotReadStatus; // TODO waiting on watch pr
 // use denokv_proto::datapath::WatchOutput;
-use denokv_sqlite::SqliteMessageHandle;
 // use denokv_sqlite::SqliteNotifier;
+use denokv_sqlite::SqliteMessageHandle;
 use napi::bindgen_prelude::{Buffer,Result,Either,Undefined};
 use napi_derive::napi;
 use denokv_sqlite::Sqlite;
@@ -29,7 +29,7 @@ pub fn open(path: String, debug: bool) -> u32 {
   let rng: Box<_> = Box::new(rand::rngs::StdRng::from_entropy());
   
   let opened_path = conn.path().unwrap().to_owned();
-  // let notifier = SqliteNotifier::default(); // TODO watch
+  // let notifier = SqliteNotifier::default(); // TODO waiting on watch pr
   // let sqlite = Sqlite::new(conn, notifier, rng).unwrap();
   let notify = Arc::new(Notify::new());
   let sqlite = Sqlite::new(conn, notify, rng).unwrap();
@@ -135,9 +135,12 @@ pub async fn finish_message(db_id: u32, message_id: u32, success: bool, debug: b
   handle.finish(success).await.unwrap();
 }
 
-// TODO watch
-// #[napi]
-// pub async fn start_watch(db_id: u32, watch_bytes: Buffer, debug: bool) -> Result<u32> {
+
+#[napi]
+pub async fn start_watch(db_id: u32, watch_bytes: Buffer, debug: bool) -> Result<u32> {
+  if debug { println!("[napi] start_watch: db_id={:#?} watch_bytes={:#?}", db_id, watch_bytes.to_vec()) }
+
+//   // TODO waiting on watch pr
 //   let watch_pb: pb::Watch = pb::Watch::decode(&mut Cursor::new(watch_bytes)).unwrap();
 //   if debug { println!("[napi] start_watch: db_id={:#?} watch_pb={:#?}", db_id, watch_pb) }
 
@@ -147,31 +150,32 @@ pub async fn finish_message(db_id: u32, message_id: u32, success: bool, debug: b
 
 //   // TODO store stream in WATCHES?
 
-//   let watch_id: u32 = WATCHES.lock().unwrap().keys().max().unwrap_or(&0) + 1;
-//   WATCHES.lock().unwrap().insert(watch_id, ());
+  let watch_id: u32 = WATCHES.lock().unwrap().keys().max().unwrap_or(&0) + 1;
+  WATCHES.lock().unwrap().insert(watch_id, ());
 
-//   Ok(watch_id)
-// }
+  Ok(watch_id)
+}
 
-// #[napi]
-// pub async fn dequeue_next_watch_message(db_id: u32, watch_id: u32, debug: bool) -> Result<Either<Buffer, Undefined>> {
-//   if debug { println!("[napi] dequeue_next_watch_message: db_id={:#?} watch_id={:#?}", db_id, watch_id) }
+#[napi]
+pub async fn dequeue_next_watch_message(db_id: u32, watch_id: u32, debug: bool) -> Result<Either<Buffer, Undefined>> {
+  if debug { println!("[napi] dequeue_next_watch_message: db_id={:#?} watch_id={:#?}", db_id, watch_id) }
 
-//   // TODO implement
+  // TODO waiting on watch pr
   
-//   let watch_output_pb = WatchOutput {
-//     status: SnapshotReadStatus::SrUnspecified.into(),
-//     keys: [].to_vec()
-//   };
-//   let bytes = to_buffer(watch_output_pb);
-//   Ok(Either::A(bytes))
-// }
+  // let watch_output_pb = WatchOutput {
+  //   status: SnapshotReadStatus::SrUnspecified.into(),
+  //   keys: [].to_vec()
+  // };
+  // let bytes = to_buffer(watch_output_pb);
+  // Ok(Either::A(bytes))
+  Ok(Either::B(()))
+}
 
-// #[napi]
-// pub fn end_watch(db_id: u32, watch_id: u32, debug: bool) {
-//   if debug { println!("[napi] end_watch: db_id={:#?} watch_id={:#?}", db_id, watch_id) }
-//   WATCHES.lock().unwrap().remove(&watch_id);
-// }
+#[napi]
+pub fn end_watch(db_id: u32, watch_id: u32, debug: bool) {
+  if debug { println!("[napi] end_watch: db_id={:#?} watch_id={:#?}", db_id, watch_id) }
+  WATCHES.lock().unwrap().remove(&watch_id);
+}
 
 //
 
@@ -183,10 +187,9 @@ static MSGS: Lazy<Mutex<HashMap<u32, SqliteMessageHandle>>> = Lazy::new(|| {
   Mutex::new(HashMap::new())
 });
 
-// TODO watch
-// static WATCHES: Lazy<Mutex<HashMap<u32, ()>>> = Lazy::new(|| {
-//   Mutex::new(HashMap::new())
-// });
+static WATCHES: Lazy<Mutex<HashMap<u32, ()>>> = Lazy::new(|| {
+  Mutex::new(HashMap::new())
+});
 
 fn to_buffer<T: prost::Message>(output: T) -> Buffer {
   let mut buf = Vec::new();
@@ -213,7 +216,7 @@ fn convert_error_to_str(err: denokv_proto::ConvertError) -> String {
     ConvertError::InvalidMutationKind => String::from("InvalidMutationKind"),
     ConvertError::InvalidMutationExpireAt => String::from("InvalidMutationExpireAt"),
     ConvertError::InvalidMutationEnqueueDeadline => String::from("InvalidMutationEnqueueDeadline"),
-    // ConvertError::TooManyWatchedKeys => String::from("TooManyWatchedKeys"),  // TODO watch
+    // ConvertError::TooManyWatchedKeys => String::from("TooManyWatchedKeys"),  // TODO waiting on watch pr
   }
 }
 

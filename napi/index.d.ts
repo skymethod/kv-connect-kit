@@ -13,3 +13,6 @@ export interface QueueMessage {
 }
 export function dequeueNextMessage(dbId: number, debug: boolean): Promise<QueueMessage | undefined>
 export function finishMessage(dbId: number, messageId: number, success: boolean, debug: boolean): Promise<void>
+export function startWatch(dbId: number, watchBytes: Buffer, debug: boolean): Promise<number>
+export function dequeueNextWatchMessage(dbId: number, watchId: number, debug: boolean): Promise<Buffer | undefined>
+export function endWatch(dbId: number, watchId: number, debug: boolean): void
