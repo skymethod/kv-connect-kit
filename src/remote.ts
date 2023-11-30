@@ -1,4 +1,4 @@
-import { encodeHex } from './bytes.ts';
+import { ByteReader, encodeHex } from './bytes.ts';
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, fetchWatchStream } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
@@ -152,7 +152,7 @@ class RemoteKv extends ProtoBasedKv {
         const { watches } = this;
         const watchId = [...watches.keys()].reduce((a, b) => Math.max(a, b), 0) + 1;
         let readDisabled = false;
-        let reader: ReadableStreamBYOBReader | undefined;
+        let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
         async function* yieldResults(kv: RemoteKv) {
             const { metadata, debug, fetcher, maxRetries, decodeV8 } = kv;
             if (metadata.version < 3) throw new Error(`watch: Only supported in version 3 of the protocol or higher`);
@@ -165,11 +165,12 @@ class RemoteKv extends ProtoBasedKv {
             }
             if (debug) console.log(`watch: ${watchToString(req)}`);
             const stream = await fetchWatchStream(watchUrl, accessToken, metadata.databaseId, req, fetcher, maxRetries, metadata.version);
-            reader = stream.getReader({ mode: 'byob' });
+            reader = stream.getReader(); // can't use byob for node compat (fetch() response body streams are ReadableStream { locked: false, state: 'readable', supportsBYOB: false }), see https://github.com/nodejs/undici/issues/1873
+            const byteReader = new ByteReader(reader); // use our own buffered reader
             try {
                 const lastValues: ([ unknown, string ] | undefined)[] = [];
                 while (true) {
-                    const { done, value } = await reader.read(new Uint8Array(4));
+                    const { done, value } = await byteReader.read(4);
                     if (done) {
                         if (debug) console.log(`watch: done! returning`);
                         return;
@@ -177,7 +178,7 @@ class RemoteKv extends ProtoBasedKv {
                     const n = new DataView(value.buffer).getInt32(0, true);
                     if (debug) console.log(`watch: ${n}-byte message`);
                     if (n > 0) {
-                        const { done, value } = await reader.read(new Uint8Array(n));
+                        const { done, value } = await byteReader.read(n);
                         if (done) {
                             if (debug) console.log(`watch: done before message! returning`);
                             return;

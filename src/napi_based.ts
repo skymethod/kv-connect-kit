@@ -6,7 +6,6 @@ import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
 import { ProtoBasedKv } from './proto_based.ts';
-import { encodeV8 } from './v8.ts';
 import { encodeBinary as encodeWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
 import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
 
