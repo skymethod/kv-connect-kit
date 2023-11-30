@@ -1,6 +1,6 @@
 {
   "name": "@skymethod/kv-connect-kit-napi",
-  "version": "0.0.5-next.3",
+  "version": "0.0.6-next.1",
   "description": "Experimental kv-connect-kit napi sqlite backend leveraging denoland/denokv",
   "main": "index.js",
   "license": "MIT",
@@ -49,7 +49,7 @@
     "format:toml": "taplo format",
     "format:rs": "cargo fmt",
     "lint": "eslint . -c ./.eslintrc.yml",
-    "prepublishOnly": "napi prepublish -t npm",
+    "prepublishOnly": "napi prepublish --skip-gh-release",
     "test": "ava",
     "version": "napi version"
   },

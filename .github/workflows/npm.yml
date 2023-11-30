@@ -1,4 +1,4 @@
-name: CI
+name: npm
 env:
   DEBUG: napi:*
   APP_NAME: kv-connect-kit-napi
@@ -204,7 +204,7 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     permissions:
-      contents: write # to create tags
+      # contents: write # to create tags
       id-token: write # to publish provenance
     needs:
       - test-macOS-windows-binding
