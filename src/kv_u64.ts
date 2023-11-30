@@ -1,8 +1,6 @@
-import { KvU64 } from './kv_types.ts';
-
 const max = (1n << 64n) - 1n;
 
-export class _KvU64 implements KvU64 {
+export class _KvU64 {
     readonly value: bigint;
 
     constructor(value: bigint) {
@@ -12,16 +10,16 @@ export class _KvU64 implements KvU64 {
         this.value = value;
     }
 
-    sum(other: KvU64): KvU64 {
+    sum(other: { readonly value: bigint }): _KvU64 {
         return new _KvU64((this.value + other.value) % (1n << 64n));
     }
 
-    min(other: KvU64): KvU64 {
-        return other.value < this.value ? other : this;
+    min(other: { readonly value: bigint }): _KvU64 {
+        return other.value < this.value ? new _KvU64(other.value) : this;
     }
 
-    max(other: KvU64): KvU64 {
-        return other.value > this.value ? other : this;
+    max(other: { readonly value: bigint }): _KvU64 {
+        return other.value > this.value ? new _KvU64(other.value) : this;
     }
 
 }

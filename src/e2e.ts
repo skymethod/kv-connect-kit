@@ -8,8 +8,9 @@ import { assertNotEquals } from 'https://deno.land/std@0.207.0/assert/assert_not
 import { assertRejects } from 'https://deno.land/std@0.207.0/assert/assert_rejects.ts';
 import { assertThrows } from 'https://deno.land/std@0.207.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
-import { KvEntryMaybe, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
+import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
+import { AssertionError } from 'https://deno.land/std@0.207.0/assert/assertion_error.ts';
 
 export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'kck', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
 
@@ -151,7 +152,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     {
         await kv.atomic().sum([ 'u1' ], 1n).commit();
         await kv.atomic().sum([ 'u1' ], 2n).commit();
-        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(3n));
+        assertSameBigintHolder((await kv.get([ 'u1' ])).value, 3n);
     }
 
     // max
@@ -160,7 +161,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
+        assertSameBigintHolder((await kv.get([ 'u1' ])).value, 4n);
     }
 
     {
@@ -168,7 +169,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(4n));
+        assertSameBigintHolder((await kv.get([ 'u1' ])).value, 4n);
     }
 
     // min
@@ -177,7 +178,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
+        assertSameBigintHolder((await kv.get([ 'u1' ])).value, 2n);
     }
 
     {
@@ -185,7 +186,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         assert(result.ok);
         assertMatch(result.versionstamp, /^.+$/);
 
-        assertEquals((await kv.get([ 'u1' ])).value, service.newKvU64(2n));
+        assertSameBigintHolder((await kv.get([ 'u1' ])).value, 2n);
     }
 
     // atomic check
@@ -404,23 +405,20 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         await kv.atomic().delete(k1).set(k1, 'a').commit();
         assertEquals((await kv.get(k1)).value, 'a');
 
-        await kv.atomic().set(k1, service.newKvU64(1n)).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(1n));
+        await kv.atomic().delete(k1).sum(k1, 1n).sum(k1, 2n).commit();
+        assertSameBigintHolder((await kv.get(k1)).value, 3n);
 
-        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(3n));
+        await kv.atomic().delete(k1).sum(k1, 1n).sum(k1, 2n).sum(k1, 3n).commit();
+        assertSameBigintHolder((await kv.get(k1)).value, 6n);
 
-        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).sum(k1, 3n).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(6n));
+        await kv.atomic().delete(k1).sum(k1, 1n).sum(k1, 2n).set(k1, '5').commit();
+        assertEquals((await kv.get(k1)).value, '5');
 
-        await kv.atomic().set(k1, service.newKvU64(1n)).sum(k1, 2n).set(k1, service.newKvU64(5n)).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(5n));
-
-        await kv.atomic().max(k1, 100n).max(k1, 50n).max(k1, 150n).max(k1, 75n).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(150n));
+        await kv.atomic().delete(k1).sum(k1, 5n).max(k1, 100n).max(k1, 50n).max(k1, 150n).max(k1, 75n).commit();
+        assertSameBigintHolder((await kv.get(k1)).value, 150n);
 
         await kv.atomic().min(k1, 100n).min(k1, 50n).min(k1, 150n).min(k1, 75n).commit();
-        assertEquals((await kv.get(k1)).value, service.newKvU64(50n));
+        assertSameBigintHolder((await kv.get(k1)).value, 50n);
     }
 
     // close
@@ -495,4 +493,18 @@ async function logAndRethrow<T>(fn: () => Promise<T>): Promise<T> {
 function toSorted<T>(arr: T[], compareFn?: (a: T, b: T) => number): T[] { // avoid newer .toSorted to support older es environments
     const rt = [ ...arr ];
     return rt.sort(compareFn);
+}
+
+function assertSameBigintHolder(actual: unknown, expected: { value: bigint } | bigint) {
+    if (typeof actual === 'object' && actual !== null && !Array.isArray(actual) && 'value' in actual) {
+        const { value } = actual;
+        if (typeof value === 'bigint') {
+            assertEquals(value, typeof expected === 'bigint' ? expected : expected.value);
+            return;
+        } else {
+            throw new AssertionError(`Expected 'value' to be a bigint, found: ${typeof value}`);
+        }
+    } else {
+        throw new AssertionError(`Expected a bigint holder, found: ${actual}`);
+    }
 }

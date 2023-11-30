@@ -1,6 +1,6 @@
 import { decodeHex, encodeHex } from './bytes.ts';
 import { checkKeyNotEmpty, checkExpireIn, isRecord, checkMatches } from './check.ts';
-import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector, KvMutation } from './kv_types.ts';
+import { AtomicCheck, AtomicOperation, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListIterator, KvListOptions, KvListSelector } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { Deferred, defer } from './proto/runtime/async/observer.ts';
 import { decode as decodeBase64, encode as encodeBase64 } from './proto/runtime/base64.ts';
@@ -18,6 +18,16 @@ export type KvValue = {
     data: Uint8Array;
     encoding: KvValueEncoding;
 }
+
+export type KvMutation =
+    & { key: KvKey }
+    & (
+        | { type: "set"; value: unknown; expireIn?: number }
+        | { type: "delete" }
+        | { type: "sum"; value: { readonly value: bigint } }
+        | { type: "max"; value: { readonly value: bigint } }
+        | { type: "min"; value: { readonly value: bigint } }
+    );
 
 export function unpackKvu(bytes: Uint8Array): _KvU64 {
     if (bytes.length !== 8) throw new Error();

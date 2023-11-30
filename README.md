@@ -3,7 +3,7 @@
 Minimal Typescript client implementing the [KV Connect protocol](https://github.com/denoland/deno/tree/main/ext/kv#kv-connect). Access [Deno KV](https://deno.com/kv) remotely from any Javascript environment like Node, Cloudflare Workers, Bun, Deno, or the browser. 
 
 - Use `makeRemoteService` to provide your access token and configure optional setup params
-- Use the returned service to call `openKv` (equiv to [`Deno.openKv`](https://deno.land/api?s=Deno.openKv&unstable)) and `newKvU64` (equiv to [`new Deno.KvU64`](https://deno.land/api?s=Deno.KvU64&unstable))
+- Use the returned service to call `openKv` (equiv to [`Deno.openKv`](https://deno.land/api?s=Deno.openKv&unstable))
 - The `KV` instance returned can be interacted with via the standard [KV api](https://deno.land/api?s=Deno.Kv&unstable) in any Javascript environment.
 
 ### Quick start - Deno

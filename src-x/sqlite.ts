@@ -2,9 +2,9 @@ import { assertInstanceOf } from 'https://deno.land/std@0.207.0/assert/assert_in
 import { AssertionError } from 'https://deno.land/std@0.207.0/assert/assertion_error.ts';
 import { encodeHex, equalBytes } from '../src/bytes.ts';
 import { packKey, unpackKey } from '../src/kv_key.ts';
-import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from '../src/kv_types.ts';
+import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvService } from '../src/kv_types.ts';
 import { _KvU64 } from '../src/kv_u64.ts';
-import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvValueEncoding, packCursor, packKvValue, packVersionstamp, QueueHandler, QueueWorker, readValue, replacer, unpackCursor, unpackVersionstamp } from '../src/kv_util.ts';
+import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, Expirer, isValidVersionstamp, KvMutation, KvValueEncoding, packCursor, packKvValue, packVersionstamp, QueueHandler, QueueWorker, readValue, replacer, unpackCursor, unpackVersionstamp } from '../src/kv_util.ts';
 import { SqliteDb, SqliteDriver, SqlitePreparedStatement, SqliteQueryParam } from './sqlite_driver.ts';
 import { SqliteWasmDriver } from './sqlite_wasm_driver.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from '../src/v8.ts';
@@ -42,8 +42,6 @@ export interface SqliteServiceOptions {
 export function makeSqliteService(opts?: SqliteServiceOptions): KvService {
     return {
         openKv: (url) => Promise.resolve(SqliteKv.of(url ?? ':memory:', opts)),
-        newKvU64: value => new _KvU64(value),
-        isKvU64: (obj: unknown): obj is KvU64 => obj instanceof _KvU64,
     }
 }
 

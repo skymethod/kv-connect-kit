@@ -2,9 +2,9 @@ import { assertInstanceOf } from 'https://deno.land/std@0.207.0/assert/assert_in
 import { RedBlackTree } from 'https://deno.land/std@0.207.0/data_structures/red_black_tree.ts';
 import { compareBytes, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
-import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvMutation, KvService, KvU64 } from './kv_types.ts';
+import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
-import { BaseKv, CursorHolder, Enqueue, Expirer, QueueHandler, QueueWorker, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
+import { BaseKv, CursorHolder, Enqueue, Expirer, KvMutation, QueueHandler, QueueWorker, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
 import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 
 export interface InMemoryServiceOptions {
@@ -33,8 +33,6 @@ export function makeInMemoryService(opts: InMemoryServiceOptions = {}): KvServic
             }
             return Promise.resolve(kv);
         },
-        newKvU64: value => new _KvU64(value),
-        isKvU64: (obj: unknown): obj is KvU64 => obj instanceof _KvU64,
     }
 }
 

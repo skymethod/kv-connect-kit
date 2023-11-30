@@ -1,7 +1,7 @@
 import { encodeHex } from './bytes.ts';
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, fetchWatchStream } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
-import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
+import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8, readValue } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
@@ -56,8 +56,6 @@ export interface RemoteServiceOptions {
 export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     return {
         openKv: async (url) => await RemoteKv.of(url, opts),
-        newKvU64: value => new _KvU64(value),
-        isKvU64: (obj: unknown): obj is KvU64 => obj instanceof _KvU64,
     }
 }
 

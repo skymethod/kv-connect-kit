@@ -1,7 +1,7 @@
 import { isRecord } from './check.ts';
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
-import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService, KvU64 } from './kv_types.ts';
+import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
 import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
@@ -25,8 +25,6 @@ export interface NapiBasedServiceOptions {
 export function makeNapiBasedService(opts: NapiBasedServiceOptions): KvService {
     return {
         openKv: v => Promise.resolve(NapiBasedKv.of(v, opts)),
-        newKvU64: value => new _KvU64(value),
-        isKvU64: (obj: unknown): obj is KvU64 => obj instanceof _KvU64,
     }
 }
 

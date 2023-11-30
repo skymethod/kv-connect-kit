@@ -19,19 +19,6 @@ export interface KvService {
      * Meant to shadow the Deno-specific: Deno.openKv
      */
     openKv(path?: string): Promise<Kv>;
-
-    /** Create a new `KvU64` instance from the given bigint value. If the value
-     * is signed or greater than 64-bits, an error will be thrown.
-     * 
-     * Meant to shadow the Deno-specific: new Deno.KvU64(value)
-     * */
-    newKvU64(value: bigint): KvU64;
-
-    /** Returns whether or not the provided value is an instance of KvU64
-     *
-     * Meant to shadow the Deno-specific: instanceof Deno.KvU64
-     */
-    isKvU64(obj: unknown): obj is KvU64
 }
 
 export interface Kv {
@@ -523,27 +510,17 @@ export interface AtomicOperation {
      */
     check(...checks: AtomicCheck[]): this;
     /**
-     * Add to the operation a mutation that performs the specified mutation on
-     * the specified key if all checks pass during the commit. The types and
-     * semantics of all available mutations are described in the documentation
-     * for {@linkcode KvMutation}.
-     */
-    mutate(...mutations: KvMutation[]): this;
-    /**
-     * Shortcut for creating a `sum` mutation. This method wraps `n` in a
-     * {@linkcode KvU64}, so the value of `n` must be in the range
+     * Shortcut for creating a `sum` mutation, the value of `n` must be in the range
      * `[0, 2^64-1]`.
      */
     sum(key: KvKey, n: bigint): this;
     /**
-     * Shortcut for creating a `min` mutation. This method wraps `n` in a
-     * {@linkcode KvU64}, so the value of `n` must be in the range
+     * Shortcut for creating a `min` mutation, the value of `n` must be in the range
      * `[0, 2^64-1]`.
      */
     min(key: KvKey, n: bigint): this;
     /**
-     * Shortcut for creating a `max` mutation. This method wraps `n` in a
-     * {@linkcode KvU64}, so the value of `n` must be in the range
+     * Shortcut for creating a `max` mutation, the value of `n` must be in the range
      * `[0, 2^64-1]`.
      */
     max(key: KvKey, n: bigint): this;
@@ -607,57 +584,4 @@ export interface AtomicCheck {
 /** @category KV */
 export interface KvCommitError {
     ok: false;
-}
-/** **UNSTABLE**: New API, yet to be vetted.
- *
- * A mutation to a key in a {@linkcode Kv}. A mutation is a
- * combination of a key, a value, and a type. The type determines how the
- * mutation is applied to the key.
- *
- * - `set` - Sets the value of the key to the given value, overwriting any
- *   existing value. Optionally an `expireIn` option can be specified to
- *   set a time-to-live (TTL) for the key. The TTL is specified in
- *   milliseconds, and the key will be deleted from the database at earliest
- *   after the specified number of milliseconds have elapsed. Once the
- *   specified duration has passed, the key may still be visible for some
- *   additional time. If the `expireIn` option is not specified, the key will
- *   not expire.
- * - `delete` - Deletes the key from the database. The mutation is a no-op if
- *   the key does not exist.
- * - `sum` - Adds the given value to the existing value of the key. Both the
- *   value specified in the mutation, and any existing value must be of type
- *   `KvU64`. If the key does not exist, the value is set to the given
- *   value (summed with 0). If the result of the sum overflows an unsigned
- *   64-bit integer, the result is wrapped around.
- * - `max` - Sets the value of the key to the maximum of the existing value
- *   and the given value. Both the value specified in the mutation, and any
- *   existing value must be of type `KvU64`. If the key does not exist,
- *   the value is set to the given value.
- * - `min` - Sets the value of the key to the minimum of the existing value
- *   and the given value. Both the value specified in the mutation, and any
- *   existing value must be of type `KvU64`. If the key does not exist,
- *   the value is set to the given value.
- *
- * @category KV
- */
-export type KvMutation =
-    & { key: KvKey }
-    & (
-        | { type: "set"; value: unknown; expireIn?: number }
-        | { type: "delete" }
-        | { type: "sum"; value: KvU64 }
-        | { type: "max"; value: KvU64 }
-        | { type: "min"; value: KvU64 }
-    );
-
-/** **UNSTABLE**: New API, yet to be vetted.
-*
-* Wrapper type for 64-bit unsigned integers for use as values in a
-* {@linkcode Kv}.
-*
-* @category KV
-*/
-export interface KvU64 {
-    /** The value of this unsigned 64-bit integer, represented as a bigint. */
-    readonly value: bigint;
 }
