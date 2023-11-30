@@ -1,5 +1,5 @@
-import { assertEquals } from 'https://deno.land/std@0.207.0/assert/assert_equals.ts';
-import { assertThrows } from 'https://deno.land/std@0.207.0/assert/assert_throws.ts';
+import { assertEquals } from 'https://deno.land/std@0.208.0/assert/assert_equals.ts';
+import { assertThrows } from 'https://deno.land/std@0.208.0/assert/assert_throws.ts';
 import { _KvU64 } from './kv_u64.ts';
 
 Deno.test({

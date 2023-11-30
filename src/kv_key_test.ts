@@ -1,6 +1,6 @@
 import { KvKey } from './kv_types.ts';
 import { packKey, unpackKey } from './kv_key.ts';
-import { assertEquals } from 'https://deno.land/std@0.207.0/assert/assert_equals.ts';
+import { assertEquals } from 'https://deno.land/std@0.208.0/assert/assert_equals.ts';
 
 Deno.test({
     name: 'packKey/unpackKey',

@@ -1,5 +1,5 @@
-import { assertInstanceOf } from 'https://deno.land/std@0.207.0/assert/assert_instance_of.ts';
-import { AssertionError } from 'https://deno.land/std@0.207.0/assert/assertion_error.ts';
+import { assertInstanceOf } from 'https://deno.land/std@0.208.0/assert/assert_instance_of.ts';
+import { AssertionError } from 'https://deno.land/std@0.208.0/assert/assertion_error.ts';
 import { encodeHex, equalBytes } from '../src/bytes.ts';
 import { packKey, unpackKey } from '../src/kv_key.ts';
 import { AtomicCheck, Kv, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvService } from '../src/kv_types.ts';

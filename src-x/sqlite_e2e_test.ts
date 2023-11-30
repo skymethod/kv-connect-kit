@@ -1,4 +1,4 @@
-import { parseArgs as parseFlags } from 'https://deno.land/std@0.207.0/cli/parse_args.ts';
+import { parseArgs as parseFlags } from 'https://deno.land/std@0.208.0/cli/parse_args.ts';
 import { endToEnd } from '../src/e2e.ts';
 import { makeSqliteService } from './sqlite.ts';
 

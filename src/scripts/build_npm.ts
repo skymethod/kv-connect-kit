@@ -1,6 +1,6 @@
-import { join } from 'https://deno.land/std@0.207.0/path/join.ts';
+import { join } from 'https://deno.land/std@0.208.0/path/join.ts';
 import { LibName, build, emptyDir } from 'https://deno.land/x/dnt@0.39.0/mod.ts';
-import { parseArgs as parseFlags } from 'https://deno.land/std@0.207.0/cli/parse_args.ts';
+import { parseArgs as parseFlags } from 'https://deno.land/std@0.208.0/cli/parse_args.ts';
 import { generateNapiIndex } from './generate_napi_index.ts';
 
 const flags = parseFlags(Deno.args);
