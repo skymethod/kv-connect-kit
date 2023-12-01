@@ -241,12 +241,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
       - name: Publish
         if: github.repository == 'skymethod/kv-connect-kit' && startsWith(github.ref, 'refs/tags/')
         run: |
+          echo "$TAG_NAME"
           npm config set provenance true
-          if echo $TAG_NAME | grep "^v?[0-9]\+\.[0-9]\+\.[0-9]\+";
+          if grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+" <<< $TAG_NAME;
           then
             echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             VERSION=$TAG_NAME .github/npm_publish.sh
