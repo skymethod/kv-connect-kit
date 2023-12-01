@@ -1,16 +1,15 @@
-import { ByteReader, encodeHex } from './bytes.ts';
+import { ByteReader } from './bytes.ts';
 import { check, checkOptionalBoolean, checkOptionalFunction, checkOptionalNumber, checkOptionalString, checkRecord, checkString } from './check.ts';
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, fetchWatchStream } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
-import { _KvU64 } from './kv_u64.ts';
-import { DecodeV8, EncodeV8, readValue } from './kv_util.ts';
+import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { encodeJson as encodeJsonAtomicWrite } from './proto/messages/com/deno/kv/datapath/AtomicWrite.ts';
 import { encodeJson as encodeJsonSnapshotRead } from './proto/messages/com/deno/kv/datapath/SnapshotRead.ts';
 import { encodeJson as encodeJsonWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
 import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
 import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
-import { ProtoBasedKv } from './proto_based.ts';
+import { ProtoBasedKv, WatchCache } from './proto_based.ts';
 import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
 
@@ -177,7 +176,7 @@ class RemoteKv extends ProtoBasedKv {
             reader = stream.getReader(); // can't use byob for node compat (fetch() response body streams are ReadableStream { locked: false, state: 'readable', supportsBYOB: false }), see https://github.com/nodejs/undici/issues/1873
             const byteReader = new ByteReader(reader); // use our own buffered reader
             try {
-                const lastValues: ([ unknown, string ] | undefined)[] = [];
+                const cache = new WatchCache(decodeV8, keys);
                 while (true) {
                     const { done, value } = await byteReader.read(4);
                     if (done) {
@@ -204,26 +203,7 @@ class RemoteKv extends ProtoBasedKv {
                             }
                         }
                         if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`);
-                        const initial = lastValues.length === 0;
-                        outputKeys.forEach((v, i) => {
-                            const { changed, entryIfChanged } = v;
-                            if (initial && !changed) throw new Error(`watch: Expect all values in first message: ${JSON.stringify(outputKeys)}`);
-                            if (!changed) return;
-                            if (entryIfChanged) {
-                                const { value: bytes, encoding } = entryIfChanged;
-                                const value = readValue(bytes, encoding, decodeV8);
-                                const versionstamp = encodeHex(entryIfChanged.versionstamp);
-                                lastValues[i] = [ value, versionstamp ];
-                            } else {
-                                lastValues[i] = undefined; // deleted
-                            }
-                        });
-                        const entries: KvEntryMaybe<unknown>[] = keys.map((key, i) => {
-                            const lastValue = lastValues[i];
-                            if (lastValue === undefined) return { key, value: null, versionstamp: null };
-                            const [ value, versionstamp ] = lastValue;
-                            return { key, value, versionstamp };
-                        });
+                        const entries = cache.processOutputKeys(outputKeys);
                         yield entries;
                     }
                 }

@@ -2,12 +2,12 @@ import { checkObject, checkOptionalBoolean, checkOptionalFunction, checkOptional
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
-import { _KvU64 } from './kv_u64.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
-import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
-import { ProtoBasedKv } from './proto_based.ts';
 import { encodeBinary as encodeWatch } from './proto/messages/com/deno/kv/datapath/Watch.ts';
 import { decodeBinary as decodeWatchOutput } from './proto/messages/com/deno/kv/datapath/WatchOutput.ts';
+import { AtomicWrite, AtomicWriteOutput, SnapshotRead, SnapshotReadOutput, Watch } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { ProtoBasedKv, WatchCache } from './proto_based.ts';
+import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 
 export interface NapiBasedServiceOptions {
 
@@ -128,8 +128,8 @@ class NapiBasedKv extends ProtoBasedKv {
         return decodeAtomicWriteOutput(res);
     }
 
-    protected watch_(keys: readonly KvKey[], _raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
-        const { napi, dbId, debug } = this;
+    protected watch_(keys: readonly KvKey[], raw: boolean | undefined): ReadableStream<KvEntryMaybe<unknown>[]> {
+        const { napi, dbId, debug, decodeV8 } = this;
         const { startWatch, dequeueNextWatchMessage, endWatch } = napi;
         if (startWatch === undefined || dequeueNextWatchMessage === undefined || endWatch === undefined) {
             throw new Error('watch: not implemented');
@@ -139,30 +139,35 @@ class NapiBasedKv extends ProtoBasedKv {
             keys: keys.map(v => ({ key: packKey(v) })),
         };
 
-        let watchId = -1;
-        return new ReadableStream({
-            start(_controller) {
-                (async () => {
-                    watchId = await startWatch(dbId,  encodeWatch(watch), debug);
-
-                    while (true) {
-                        const watchOutputBytes = await dequeueNextWatchMessage(dbId, watchId, debug);
-                        if (watchOutputBytes === undefined) return;
-                        const watchOutput = decodeWatchOutput(watchOutputBytes);
-                        if (debug) console.log(`watch: received ${JSON.stringify(watchOutput)}`);
-                        // TODO enqueue KvEntryMaybe, similar to remote
-                    }
-                })();
-            },
-            pull(_controller) {
-                // noop
+        let watchId: number | undefined;
+        let ended = false;
+        const endWatchIfNecessary = () => {
+            if (watchId !== undefined && !ended) endWatch(dbId, watchId, debug);
+            ended = true;
+        }
+        const cache = new WatchCache(decodeV8, keys);
+        const rawStream = new ReadableStream({
+            async pull(controller) {
+                if (watchId === undefined) {
+                    watchId = await startWatch(dbId, encodeWatch(watch), debug);
+                }
+                const watchOutputBytes = await dequeueNextWatchMessage(dbId, watchId, debug);
+                if (watchOutputBytes === undefined) {
+                    endWatchIfNecessary();
+                    controller.close();
+                    return;
+                }
+                const watchOutput = decodeWatchOutput(watchOutputBytes);
+                const { status, keys: outputKeys } = watchOutput;
+                if (status !== 'SR_SUCCESS') throw new Error(`Unexpected status: ${status}`);
+                const entries = cache.processOutputKeys(outputKeys);
+                controller.enqueue(entries);
             },
             cancel() {
-                if (watchId > -1) {
-                    endWatch(dbId, watchId, debug);
-                }
+                endWatchIfNecessary();
             },
         });
+        return raw ? rawStream : makeUnrawWatchStream(rawStream, endWatchIfNecessary);
     }
 
 }

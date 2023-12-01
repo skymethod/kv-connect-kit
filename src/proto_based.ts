@@ -2,7 +2,7 @@ import { decodeHex, encodeHex, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector } from './kv_types.ts';
 import { BaseKv, CursorHolder, DecodeV8, EncodeV8, Enqueue, KvMutation, packCursor, packKvValue, readValue, unpackCursor } from './kv_util.ts';
-import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvCheckMessage, Mutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
+import { AtomicWrite, AtomicWriteOutput, Enqueue as EnqueueMessage, Check as KvCheckMessage, Mutation as KvMutationMessage, ReadRange, SnapshotRead, SnapshotReadOutput, WatchKeyOutput } from './proto/messages/com/deno/kv/datapath/index.ts';
 export { UnknownV8 } from './v8.ts';
 
 export abstract class ProtoBasedKv extends BaseKv {
@@ -116,6 +116,42 @@ export abstract class ProtoBasedKv extends BaseKv {
         }
     }
 
+}
+
+export class WatchCache {
+    private readonly decodeV8: DecodeV8;
+    private readonly keys: readonly KvKey[];
+    private readonly lastValues: ([ unknown, string ] | undefined)[] = [];
+
+    constructor(decodeV8: DecodeV8, keys: readonly KvKey[]) {
+        this.decodeV8 = decodeV8;
+        this.keys = keys;
+    }
+
+    processOutputKeys(outputKeys: WatchKeyOutput[]): KvEntryMaybe<unknown>[] {
+        const { lastValues, decodeV8, keys } = this;
+        const initial = lastValues.length === 0;
+        outputKeys.forEach((v, i) => {
+            const { changed, entryIfChanged } = v;
+            if (initial && !changed) throw new Error(`watch: Expect all values in first message: ${JSON.stringify(outputKeys)}`);
+            if (!changed) return;
+            if (entryIfChanged) {
+                const { value: bytes, encoding } = entryIfChanged;
+                const value = readValue(bytes, encoding, decodeV8);
+                const versionstamp = encodeHex(entryIfChanged.versionstamp);
+                lastValues[i] = [ value, versionstamp ];
+            } else {
+                lastValues[i] = undefined; // deleted
+            }
+        });
+        return keys.map((key, i) => {
+            const lastValue = lastValues[i];
+            if (lastValue === undefined) return { key, value: null, versionstamp: null };
+            const [ value, versionstamp ] = lastValue;
+            return { key, value, versionstamp };
+        });
+    }
+    
 }
 
 //
