@@ -1,4 +1,4 @@
-import { isRecord } from './check.ts';
+import { checkObject, checkOptionalBoolean, checkOptionalFunction, checkOptionalString, checkRecord, isRecord } from './check.ts';
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
@@ -73,6 +73,12 @@ class NapiBasedKv extends ProtoBasedKv {
     }
 
     static of(url: string | undefined, opts: NapiBasedServiceOptions): NapiBasedKv {
+        checkOptionalString('url', url);
+        checkRecord('opts', opts);
+        checkOptionalBoolean('opts.debug', opts.debug);
+        checkObject('opts.napi', opts.napi);
+        checkOptionalFunction('opts.decodeV8', opts.decodeV8);
+        checkOptionalFunction('opts.encodeV8', opts.encodeV8);
         const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8, encodeV8 } = opts;
         if (typeof url !== 'string' || /^https?:\/\//i.test(url)) throw new Error(`Invalid path: ${url}`);
         if (napi === undefined) throw new Error(`No default napi interface, provide one via the 'napi' option.`);

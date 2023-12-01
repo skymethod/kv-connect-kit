@@ -1,3 +1,4 @@
+import { checkOptionalBoolean, checkOptionalString, checkRecord } from './check.ts';
 import { makeInMemoryService } from './in_memory.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { isNapiInterface, makeNapiBasedService } from './napi_based.ts';
@@ -21,6 +22,10 @@ export { UnknownV8 } from './v8.ts';
  * When no path is provided, this will use an ephemeral in-memory implementation.
  */
 export async function openKv(path?: string, opts: Record<string, unknown> & { debug?: boolean } = {}) {
+    checkOptionalString('path', path);
+    checkRecord('opts', opts);
+    checkOptionalBoolean('opts.debug', opts.debug);
+
     const debug = opts.debug === true;
 
     // use built-in native implementation if available when running on Deno

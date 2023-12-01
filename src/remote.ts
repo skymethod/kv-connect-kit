@@ -1,4 +1,5 @@
 import { ByteReader, encodeHex } from './bytes.ts';
+import { check, checkOptionalBoolean, checkOptionalFunction, checkOptionalNumber, checkOptionalString, checkRecord, checkString } from './check.ts';
 import { DatabaseMetadata, KvConnectProtocolVersion, fetchAtomicWrite, fetchDatabaseMetadata, fetchSnapshotRead, fetchWatchStream } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
@@ -134,8 +135,16 @@ class RemoteKv extends ProtoBasedKv {
     }
 
     static async of(url: string | undefined, opts: RemoteServiceOptions) {
+        checkOptionalString('url', url);
+        checkRecord('opts', opts);
+        checkString('opts.accessToken', opts.accessToken);
+        checkOptionalBoolean('opts.wrapUnknownValues', opts.wrapUnknownValues);
+        checkOptionalBoolean('opts.debug', opts.debug);
+        checkOptionalFunction('opts.fetcher', opts.fetcher);
+        checkOptionalNumber('opts.maxRetries', opts.maxRetries);
+        check('opts.supportedVersions', opts.supportedVersions, opts.supportedVersions === undefined || Array.isArray(opts.supportedVersions) && opts.supportedVersions.every(v => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ));
         const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, maxRetries = 10, supportedVersions = [ 1, 2, 3 ] } = opts;
-        if (url === undefined || !isValidHttpUrl(url)) throw new Error(`'path' must be an http(s) url`);
+        if (url === undefined || !isValidHttpUrl(url)) throw new Error(`Bad 'path': must be an HTTP(S) url, found ${url}`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;

@@ -6,6 +6,7 @@ import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry
 import { _KvU64 } from './kv_u64.ts';
 import { BaseKv, CursorHolder, Enqueue, Expirer, KvMutation, QueueHandler, QueueWorker, isValidVersionstamp, packCursor, packVersionstamp, replacer, unpackCursor } from './kv_util.ts';
 import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
+import { checkOptionalBoolean, checkOptionalNumber, checkRecord } from './check.ts';
 
 export interface InMemoryServiceOptions {
 
@@ -21,6 +22,9 @@ export interface InMemoryServiceOptions {
  * Return a new KvService that creates ephemeral in-memory KV instances.
  */
 export function makeInMemoryService(opts: InMemoryServiceOptions = {}): KvService {
+    checkRecord('opts', opts);
+    checkOptionalBoolean('opts.debug', opts.debug);
+    checkOptionalNumber('opts.maxQueueAttempts', opts.maxQueueAttempts);
     const { debug = false, maxQueueAttempts = 10 } = opts;
     const instances = new Map<string, InMemoryKv>();
     return {
