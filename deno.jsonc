@@ -19,5 +19,15 @@
                 "no-invalid-triple-slash-reference"
             ]
         }
-    }
+    },
+    "fmt": {
+        "exclude": [
+            "src/proto", // generated
+        ],
+        "include": [
+            "src",
+            "src-x"
+        ],
+    },
+    "lock": false,
 }
