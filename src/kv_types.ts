@@ -2,16 +2,8 @@
 (Symbol as any).dispose ??= Symbol('Symbol.dispose'); // polyfill if needed
 
 export interface KvService {
-    /** Open a new {@linkcode Deno.Kv} connection to persist data.
-     *
-     * When a path is provided, the database will be persisted to disk at that
-     * path. Read and write access to the file is required.
-     *
-     * When no path is provided, the database will be opened in a default path for
-     * the current script. This location is persistent across script runs and is
-     * keyed on the origin storage key (the same key that is used to determine
-     * `localStorage` persistence). More information about the origin storage key
-     * can be found in the Deno Manual.
+    /**
+     * Open a new {@linkcode Kv} connection to persist data.
      *
      * @tags allow-read, allow-write
      * @category KV

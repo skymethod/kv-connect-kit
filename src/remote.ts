@@ -51,7 +51,7 @@ export interface RemoteServiceOptions {
 }
 
 /**
- * Creates a new KvService instance that can be used to open a remote KV database.
+ * Return a new KvService that can be used to open a remote KV database.
  */
 export function makeRemoteService(opts: RemoteServiceOptions): KvService {
     return {

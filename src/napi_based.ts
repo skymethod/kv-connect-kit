@@ -29,6 +29,9 @@ export interface NapiBasedServiceOptions {
 
 }
 
+/**
+ * Return a KVService that creates KV instances backed by a native Node NAPI interface.
+ */
 export function makeNapiBasedService(opts: NapiBasedServiceOptions): KvService {
     return {
         openKv: v => Promise.resolve(NapiBasedKv.of(v, opts)),

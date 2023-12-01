@@ -18,7 +18,7 @@ export interface InMemoryServiceOptions {
 }
 
 /**
- * Creates a new KvService that creates in-memory kv instances
+ * Return a new KvService that creates ephemeral in-memory KV instances.
  */
 export function makeInMemoryService(opts: InMemoryServiceOptions = {}): KvService {
     const { debug = false, maxQueueAttempts = 10 } = opts;
