@@ -11,10 +11,10 @@ const flags = parseFlags(Deno.args);
 const debug = !!flags.debug;
 
 Deno.test({
-    name: 'e2e-kck-in-memory',
+    name: 'e2e-userland-in-memory',
     only: false,
     fn: async () => {
-        await endToEnd(makeInMemoryService({ debug, maxQueueAttempts: 1 }), { type: 'kck', subtype: 'in-memory', path: ':memory:' });
+        await endToEnd(makeInMemoryService({ debug, maxQueueAttempts: 1 }), { type: 'userland', subtype: 'in-memory', path: ':memory:' });
     }
 });
 
@@ -30,7 +30,7 @@ Deno.test({
     name: 'e2e-deno-disk',
     only: false,
     fn: async () => {
-        const path = await Deno.makeTempFile({ prefix: 'kck-e2e-tests-', suffix: '.db' });
+        const path = await Deno.makeTempFile({ prefix: 'userland-e2e-tests-', suffix: '.db' });
         try {
             await endToEnd(makeNativeService(), { type: 'deno', path });
         } finally {
@@ -77,7 +77,7 @@ Deno.test({
 });
 
 Deno.test({
-    name: 'e2e-kck-remote',
+    name: 'e2e-userland-remote',
     only: false,
     ignore: !(typeof denoKvAccessToken === 'string' && denoKvDatabaseId),
     fn: async () => {
@@ -85,7 +85,7 @@ Deno.test({
         const service = makeRemoteService({ accessToken: denoKvAccessToken as string, debug });
         await clear(service, path);
         try {
-            await endToEnd(service, { type: 'kck', subtype: 'remote', path });
+            await endToEnd(service, { type: 'userland', subtype: 'remote', path });
         } finally {
             await clear(service, path);
         }
@@ -113,13 +113,13 @@ Deno.test({
 Deno.test({
     only: false,
     ignore: !(typeof denoKvAccessToken === 'string' && localKvUrl),
-    name: 'e2e-kck-localkv',
+    name: 'e2e-userland-localkv',
     fn: async () => {
         const path = localKvUrl as string;
         const service = makeRemoteService({ accessToken: denoKvAccessToken as string, debug, maxRetries: 0 });
         await clear(service, path);
         try {
-            await endToEnd(service, { type: 'kck', subtype: 'remote', path });
+            await endToEnd(service, { type: 'userland', subtype: 'remote', path });
         } finally {
             await clear(service, path);
         }

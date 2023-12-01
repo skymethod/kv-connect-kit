@@ -17,7 +17,7 @@ const version = typeof Deno.args[0] === 'string' ? stripLeadingV(Deno.args[0]) :
 if (typeof version !== 'string' || !/^[a-z0-9.-]+$/.test(version)) throw new Error(`Unexpected version: ${version}`);
 console.log(`version=${version}`);
 
-const outDir = await Deno.makeTempDir({ prefix: 'kck-npm-'});
+const outDir = await Deno.makeTempDir({ prefix: 'userland-npm-'});
 await emptyDir(outDir);
 
 await build({

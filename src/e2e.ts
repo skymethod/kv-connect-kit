@@ -12,7 +12,7 @@ import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
 import { AssertionError } from 'https://deno.land/std@0.208.0/assert/assertion_error.ts';
 
-export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'kck', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
+export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'userland', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
 
     const pathType = path === ':memory:' ? 'memory' : /^https?:\/\//.test(path) ? 'remote' : 'disk';
     const napi = subtype === 'napi';
@@ -203,7 +203,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         // await kv.set([ 'e' ], 'e', { expireIn: -1000 });
         // assertEquals((await kv.get([ 'e' ])).value, null); // native persists the value, probably shouldn't: https://github.com/denoland/deno/issues/21009
 
-        if (type === 'kck' && pathType !== 'remote' && !napi) { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or kck, nor napi
+        if (type === 'userland' && pathType !== 'remote' && !napi) { // native sqlite doesn't do timely-enough expiration, neither does deno deploy via native or userland, nor napi
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: 0 }));
             await assertRejects(async () => await kv.set([ 'be' ], 'be', { expireIn: -1000 }));
             await kv.set([ 'e' ], 'e', { expireIn: 100 });
@@ -262,7 +262,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
 
         // batchSize
         await Promise.all([ 'foo', '', {}, false, -1, 0, 1001 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any })))));
-        if (type === 'kck') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
+        if (type === 'userland') await Promise.all([ 1.2, 2.3 ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { batchSize: v as any }))))); // native should probably throw: https://github.com/denoland/deno/issues/21013
 
         // cursor
         const iter = kv.list({ prefix: [] });
@@ -276,12 +276,12 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         await assertList({ prefix: [] }, { cursor: cursor1 }, { a_a: 'a_a', a_b: 'a_b', b: 'b' });
         await assertList({ prefix: [] }, { cursor: cursor2 }, { a_b: 'a_b', b: 'b' });
         await Promise.all([ [], {}, '.', 123n ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `${v}`)));
-        if (type === 'kck') await Promise.all([ true, -1, 0, 'asdf', null ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `cursor: ${v}`)));
+        if (type === 'userland') await Promise.all([ true, -1, 0, 'asdf', null ].map(v => assertRejects(async () => await toArray(kv.list({ prefix: [] }, { cursor: v as any })), `cursor: ${v}`)));
 
     }
 
     // enqueue/listenQueue
-    if (type === 'kck' && pathType !== 'remote') {
+    if (type === 'userland' && pathType !== 'remote') {
         const delay = napi ? 1000 : pathType === 'disk' ? 200 : 20;
         const records: Record<string, { sent: number, received?: number }> = {};
         kv.listenQueue(v => {
@@ -322,7 +322,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     }
 
     // watch
-    if (subtype === 'in-memory' || type === 'kck' && pathType === 'remote'/* && path.includes('/localhost')*/) { // TODO remove once deploy supports v3
+    if (subtype === 'in-memory' || type === 'userland' && pathType === 'remote') {
         {
             // raw=true
             const reader = kv.watch<[ string, string ]>([ [ 'w1' ], [ 'w2' ] ], { raw: true }).getReader();
