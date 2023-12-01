@@ -52,7 +52,7 @@ await build({
     async postBuild() {
         // steps to run after building and before running the tests
         await Deno.copyFile('LICENSE', join(outDir, 'LICENSE'));
-        await Deno.copyFile('README.md', join(outDir, 'README.md'));
+        await Deno.copyFile(napi ? 'napi/README.md' : 'README.md', join(outDir, 'README.md'));
         if (napi) {
             const napiIndexJs = generateNapiIndex({ napiPackageName: napi.packageName, napiArtifactName: napi.artifactName });
             for (const subdir of [ 'script', 'esm' ]) {
