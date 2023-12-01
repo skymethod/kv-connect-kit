@@ -27,6 +27,9 @@ export interface NapiBasedServiceOptions {
      * When you are running on Node 18+, pass the 'deserialize' function in Node's 'v8' module. */
     readonly decodeV8: DecodeV8;
 
+    /** The database will be opened as an in-memory database. */
+    readonly inMemory?: boolean;
+
 }
 
 /**
@@ -39,7 +42,7 @@ export function makeNapiBasedService(opts: NapiBasedServiceOptions): KvService {
 }
 
 export interface NapiInterface {
-    open(path: string, debug: boolean): number;
+    open(path: string, inMemory: boolean | undefined | null, debug: boolean): number;
     close(db: number, debug: boolean): void;
     snapshotRead(dbId: number, snapshotReadBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
     atomicWrite(dbId: number, atomicWriteBytes: Uint8Array, debug: boolean): Promise<Uint8Array>;
@@ -79,10 +82,12 @@ class NapiBasedKv extends ProtoBasedKv {
         checkObject('opts.napi', opts.napi);
         checkOptionalFunction('opts.decodeV8', opts.decodeV8);
         checkOptionalFunction('opts.encodeV8', opts.encodeV8);
-        const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8, encodeV8 } = opts;
+        checkOptionalBoolean('opts.inMemory', opts.inMemory);
+
+        const { debug = false, napi = DEFAULT_NAPI_INTERFACE, decodeV8, encodeV8, inMemory } = opts;
         if (typeof url !== 'string' || /^https?:\/\//i.test(url)) throw new Error(`Invalid path: ${url}`);
         if (napi === undefined) throw new Error(`No default napi interface, provide one via the 'napi' option.`);
-        const dbId = napi.open(url, debug);
+        const dbId = napi.open(url, inMemory, debug);
         return new NapiBasedKv(debug, napi, dbId, decodeV8, encodeV8);
     }
 

@@ -77,5 +77,6 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
     // else use the napi implementation
     const { napi } = opts;
     if (napi !== undefined && !isNapiInterface(napi)) throw new Error(`Unexpected napi interface for sqlite`);
-    return await makeNapiBasedService({ debug, encodeV8, decodeV8, napi }).openKv(path);
+    const inMemory = typeof opts.inMemory === 'boolean' ? opts.inMemory : undefined;
+    return await makeNapiBasedService({ debug, encodeV8, decodeV8, napi, inMemory }).openKv(path);
 }

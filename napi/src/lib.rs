@@ -7,6 +7,7 @@ use denokv_sqlite::SqliteMessageHandle;
 use napi::bindgen_prelude::{Buffer,Result,Either,Undefined};
 use napi_derive::napi;
 use denokv_sqlite::Sqlite;
+use rusqlite::OpenFlags;
 use tokio::sync::Notify;
 use std::collections::HashMap;
 use std::path::Path;
@@ -23,9 +24,10 @@ use std::io::Cursor;
 use once_cell::sync::Lazy;
 
 #[napi]
-pub fn open(path: String, debug: bool) -> u32 {
-  if debug { println!("[napi] open: path={:#?}", path) }
-  let conn = Connection::open(Path::new(&path)).unwrap();
+pub fn open(path: String, in_memory: Option<bool>, debug: bool) -> u32 {
+  if debug { println!("[napi] open: path={:#?} in_memory={:#?}", path, in_memory) }
+  let flags = if in_memory.is_some() && in_memory.unwrap() { OpenFlags::default() | OpenFlags::SQLITE_OPEN_MEMORY } else { OpenFlags::default() };
+  let conn = Connection::open_with_flags(Path::new(&path), flags).unwrap();
   let rng: Box<_> = Box::new(rand::rngs::StdRng::from_entropy());
   
   let opened_path = conn.path().unwrap().to_owned();
