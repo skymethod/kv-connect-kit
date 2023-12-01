@@ -14,7 +14,8 @@ test('native function exports', (t) => {
 test('memory db open/close', (t) => {
   t.notThrows(() => {
     const debug = false;
-    const dbId = open(':memory:', debug);
+    const inMemory = undefined;
+    const dbId = open(':memory:', inMemory, debug);
     close(dbId, debug);
   })
 })
