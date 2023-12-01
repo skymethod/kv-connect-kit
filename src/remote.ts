@@ -144,7 +144,7 @@ class RemoteKv extends ProtoBasedKv {
         checkOptionalNumber('opts.maxRetries', opts.maxRetries);
         check('opts.supportedVersions', opts.supportedVersions, opts.supportedVersions === undefined || Array.isArray(opts.supportedVersions) && opts.supportedVersions.every(v => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ));
         const { accessToken, wrapUnknownValues = false, debug = false, fetcher = fetch, maxRetries = 10, supportedVersions = [ 1, 2, 3 ] } = opts;
-        if (url === undefined || !isValidHttpUrl(url)) throw new Error(`Bad 'path': must be an HTTP(S) url, found ${url}`);
+        if (url === undefined || !isValidHttpUrl(url)) throw new Error(`Bad 'path': must be an http(s) url, found ${url}`);
         const metadata = await fetchNewDatabaseMetadata(url, accessToken, debug, fetcher, maxRetries, supportedVersions);
         
         const encodeV8: EncodeV8 = opts.encodeV8 ?? _encodeV8;
