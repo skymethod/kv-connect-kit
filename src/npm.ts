@@ -1,5 +1,6 @@
 import { check, checkOptionalBoolean, checkOptionalString, checkRecord } from './check.ts';
 import { makeInMemoryService } from './in_memory.ts';
+import { Kv } from './kv_types.ts';
 import { DecodeV8, EncodeV8 } from './kv_util.ts';
 import { isNapiInterface, makeNapiBasedService } from './napi_based.ts';
 import { makeNativeService } from './native.ts';
@@ -23,7 +24,7 @@ export type KvImplementation = 'in-memory' | 'sqlite' | 'remote';
  *
  * When no path is provided, this will use an ephemeral in-memory implementation.
  */
-export async function openKv(path?: string, opts: Record<string, unknown> & { debug?: boolean, implementation?: KvImplementation } = {}) {
+export async function openKv(path?: string, opts: Record<string, unknown> & { debug?: boolean, implementation?: KvImplementation } = {}): Promise<Kv> {
     checkOptionalString('path', path);
     checkRecord('opts', opts);
     checkOptionalBoolean('opts.debug', opts.debug);
@@ -35,7 +36,7 @@ export async function openKv(path?: string, opts: Record<string, unknown> & { de
     if ('Deno' in globalThis && !implementation) {
         // deno-lint-ignore no-explicit-any
         const { openKv } = (globalThis as any).Deno;
-        if (typeof openKv === 'function') return makeNativeService();
+        if (typeof openKv === 'function') return makeNativeService().openKv(path);
     }
 
     // use in-memory implementation if no path provided
