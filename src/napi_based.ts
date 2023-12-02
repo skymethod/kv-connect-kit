@@ -1,4 +1,4 @@
-import { checkObject, checkOptionalBoolean, checkOptionalFunction, checkOptionalString, checkRecord, isRecord } from './check.ts';
+import { checkOptionalBoolean, checkOptionalFunction, checkOptionalObject, checkOptionalString, checkRecord, isRecord } from './check.ts';
 import { decodeAtomicWriteOutput, decodeSnapshotReadOutput, encodeAtomicWrite, encodeSnapshotRead } from './kv_connect_api.ts';
 import { packKey } from './kv_key.ts';
 import { KvConsistencyLevel, KvEntryMaybe, KvKey, KvService } from './kv_types.ts';
@@ -79,7 +79,7 @@ class NapiBasedKv extends ProtoBasedKv {
         checkOptionalString('url', url);
         checkRecord('opts', opts);
         checkOptionalBoolean('opts.debug', opts.debug);
-        checkObject('opts.napi', opts.napi);
+        checkOptionalObject('opts.napi', opts.napi);
         checkOptionalFunction('opts.decodeV8', opts.decodeV8);
         checkOptionalFunction('opts.encodeV8', opts.encodeV8);
         checkOptionalBoolean('opts.inMemory', opts.inMemory);

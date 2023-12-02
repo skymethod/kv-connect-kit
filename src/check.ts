@@ -48,8 +48,8 @@ export function checkOptionalFunction(name: string, value: unknown): asserts val
     if (!(value === undefined || typeof value === 'function')) throw new TypeError(`Bad '${name}': expected optional function, found ${value}`);
 }
 
-export function checkObject(name: string, value: unknown): asserts value is object {
-    if (typeof value !== 'object') throw new TypeError(`Bad '${name}': expected object, found ${value}`);
+export function checkOptionalObject(name: string, value: unknown): asserts value is object {
+    if (!(value === undefined || typeof value === 'object')) throw new TypeError(`Bad '${name}': expected optional object, found ${value}`);
 }
 
 export function check(name: string, value: unknown, valid: boolean) {
