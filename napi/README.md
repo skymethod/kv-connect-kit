@@ -16,11 +16,13 @@ _Remote KV Database_
 ```ts
 import { openKv } from '@skymethod/kv-connect-kit-napi';
 
-const accessToken = process.env['DENO_KV_ACCESS_TOKEN'];
-if (accessToken === undefined) throw new Error(`Set your personal access token: https://dash.deno.com/account#access-tokens`);
+// to open a database connection to an existing Deno Deploy KV database,
+// first obtain the database ID from your project dashboard: 
+// https://dash.deno.com/projects/YOUR_PROJECT/kv
 
-// open a database connection to an existing Deno Deploy KV database url, obtained from project dashboard: https://dash.deno.com/projects/YOUR_PROJECT/kv
-const kv = await openKv('https://api.deno.com/databases/YOUR_DATABASE_ID/connect', { accessToken });
+// connect to the remote database
+const kv = await openKv('https://api.deno.com/databases/YOUR_DATABASE_ID/connect');
+// access token for auth is the value of environment variable DENO_KV_ACCESS_TOKEN by default
 
 // do anything using the KV api: https://deno.land/api?s=Deno.Kv&unstable
 const result = await kv.set([ 'from-client' ], 'hello!');
@@ -28,6 +30,9 @@ console.log(result);
 
 // close the database connection
 kv.close();
+
+// to provide an explicit access token, pass it as an additional option
+const kv2 = await openKv('https://api.deno.com/databases/YOUR_DATABASE_ID/connect', { accessToken: mySecretAccessToken });
 ```
 
 _Local KV Database_
@@ -59,6 +64,8 @@ console.log(result);
 // close the database connection
 kv.close();
 ```
+
+> Examples use ESM syntax, but this package supports CJS `require`-based usage as well
 
 ### Local KV Databases
 
