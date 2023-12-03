@@ -2,7 +2,7 @@
 authors = []
 edition = "2021"
 name    = "kv-connect-kit-napi"
-version = "0.1.0"
+version = "0.0.0" # never published
 
 [lib]
 crate-type = ["cdylib"]
