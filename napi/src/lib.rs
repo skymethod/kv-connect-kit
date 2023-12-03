@@ -223,5 +223,5 @@ fn convert_error_to_str(err: denokv_proto::ConvertError) -> String {
   }
 }
 
-fn convert_error_to_anyhow(err: denokv_proto::ConvertError) -> anyhow::Error { err.into() }
+fn convert_error_to_anyhow(err: denokv_proto::ConvertError) -> anyhow::Error { anyhow::anyhow!(convert_error_to_str(err)) }
 fn convert_sqlite_backend_error_to_anyhow(err: SqliteBackendError) -> anyhow::Error { err.into() }
