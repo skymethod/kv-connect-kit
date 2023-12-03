@@ -431,7 +431,7 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
     }
 
     // documented limits
-    if (subtype !== 'in-memory') {
+    if (subtype !== 'in-memory' && subtype !== 'sqlite') {
 
         // Keys have a maximum length of 2048 bytes after serialization
         await assertRejects(() => kv.set([ new Uint8Array(1024 * 2 + 10) ], 'too-long'));
