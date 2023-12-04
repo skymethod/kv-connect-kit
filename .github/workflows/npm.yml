@@ -86,14 +86,12 @@ jobs:
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
-        with:
-          version: 0.11.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
+      - name: Check formatting
+        run: cargo fmt -- --check
+        working-directory: ./napi
+      - name: Check linting
+        run: cargo clippy --release --all-targets --all-features -- -D clippy::all
+        working-directory: ./napi
       - name: Setup node x86
         if: matrix.settings.target == 'i686-pc-windows-msvc'
         run: yarn config set supportedArchitectures.cpu "ia32"
@@ -239,7 +237,6 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           VERSION=0.0.0-dryrun DRY_RUN=1 .github/npm_publish.sh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish
         if: github.repository == 'skymethod/kv-connect-kit' && startsWith(github.ref, 'refs/tags/')
@@ -254,6 +251,5 @@ jobs:
             echo "Not a release, skipping publish"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
