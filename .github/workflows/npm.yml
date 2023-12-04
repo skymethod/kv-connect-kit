@@ -89,9 +89,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
         working-directory: ./napi
-      - name: Check linting
-        run: cargo clippy --release --all-targets --all-features -- -D clippy::all
-        working-directory: ./napi
       - name: Setup node x86
         if: matrix.settings.target == 'i686-pc-windows-msvc'
         run: yarn config set supportedArchitectures.cpu "ia32"
@@ -119,6 +116,9 @@ jobs:
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+        working-directory: ./napi
+      - name: Check linting # needs to run after build so protoc is available
+        run: cargo clippy --release --all-targets --all-features -- -D clippy::all
         working-directory: ./napi
       - name: Upload artifact
         uses: actions/upload-artifact@v3
