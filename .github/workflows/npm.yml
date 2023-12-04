@@ -119,6 +119,7 @@ jobs:
         working-directory: ./napi
       - name: Check linting # needs to run after build so protoc is available
         run: cargo clippy --release --all-targets --all-features -- -D clippy::all
+        if: ${{ !matrix.settings.docker }}
         working-directory: ./napi
       - name: Upload artifact
         uses: actions/upload-artifact@v3
