@@ -271,8 +271,7 @@ static MSGS: Lazy<Mutex<HashMap<u32, SqliteMessageHandle>>> =
 static WATCHES: Lazy<Mutex<HashMap<u32, ()>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn to_buffer<T: prost::Message>(output: T) -> Buffer {
-  let mut buf = Vec::new();
-  buf.reserve(output.encoded_len());
+  let mut buf = Vec::with_capacity(output.encoded_len());
   output.encode(&mut buf).unwrap();
   buf.into()
 }
