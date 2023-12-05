@@ -8,10 +8,11 @@ version = "0.0.0" # never published
 crate-type = ["cdylib"]
 
 [dependencies]
+futures = "0.3.28"
 napi = {version="2", features=["async","anyhow"]}
 napi-derive = "2"
-denokv_sqlite = "0.4.0"
-denokv_proto = "0.4.0"
+denokv_sqlite = "0.5.0"
+denokv_proto = "0.5.0"
 rand = "0.8.5"
 rand_distr = "0.3.0"
 tokio = { version = "1.33.0", features = ["full"] }

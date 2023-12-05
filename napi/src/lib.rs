@@ -1,16 +1,18 @@
 #![deny(clippy::all)]
-use denokv_proto::ConvertError;
-use denokv_sqlite::SqliteBackendError;
-// use denokv_proto::datapath::SnapshotReadStatus; // TODO waiting on watch pr
-// use denokv_proto::datapath::WatchOutput;
-// use denokv_sqlite::SqliteNotifier;
 use denokv_proto::datapath as pb;
 use denokv_proto::Consistency;
+use denokv_proto::ConvertError;
 use denokv_proto::ReadRange;
 use denokv_proto::SnapshotReadOptions;
+use denokv_proto::WatchKeyOutput;
 use denokv_sqlite::Connection;
 use denokv_sqlite::Sqlite;
+use denokv_sqlite::SqliteBackendError;
 use denokv_sqlite::SqliteMessageHandle;
+use denokv_sqlite::SqliteNotifier;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use futures::TryStreamExt;
 use napi::bindgen_prelude::{Buffer, Either, Result, Undefined};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
@@ -22,12 +24,10 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::sync::Notify;
 
 #[napi]
-pub fn open(path: String, in_memory: Option<bool>, debug: bool) -> u32 {
+pub fn open(path: String, in_memory: Option<bool>, debug: bool) -> Result<u32> {
   if debug {
     println!("[napi] open: path={:#?} in_memory={:#?}", path, in_memory)
   }
@@ -36,14 +36,25 @@ pub fn open(path: String, in_memory: Option<bool>, debug: bool) -> u32 {
   } else {
     OpenFlags::default()
   };
-  let conn = Connection::open_with_flags(Path::new(&path), flags).unwrap();
+  let conn = Connection::open_with_flags(Path::new(&path), flags)
+    .map_err(anyhow::Error::from)?;
+  conn
+    .pragma_update(None, "journal_mode", "wal")
+    .map_err(anyhow::Error::from)?;
   let rng = Box::new(rand::rngs::StdRng::from_entropy());
 
-  let opened_path = conn.path().unwrap().to_owned();
-  // let notifier = SqliteNotifier::default(); // TODO waiting on watch pr
-  // let sqlite = Sqlite::new(conn, notifier, rng).unwrap();
-  let notify = Arc::new(Notify::new());
-  let sqlite = Sqlite::new(conn, notify, rng).unwrap();
+  let opened_path = conn.path().map(|p| p.to_string());
+  let notifier = match &opened_path {
+    Some(opened_path) if !opened_path.is_empty() => NOTIFIERS_MAP
+      .lock()
+      .unwrap()
+      .entry(opened_path.clone())
+      .or_default()
+      .clone(),
+    _ => SqliteNotifier::default(),
+  };
+
+  let sqlite = Sqlite::new(conn, notifier, rng)?;
 
   let db_id = DB_ID.fetch_add(1, Ordering::Relaxed);
   DBS.lock().unwrap().insert(db_id, sqlite);
@@ -54,7 +65,7 @@ pub fn open(path: String, in_memory: Option<bool>, debug: bool) -> u32 {
       db_id, opened_path
     )
   }
-  db_id
+  Ok(db_id)
 }
 
 #[napi]
@@ -244,26 +255,27 @@ pub async fn start_watch(
   watch_bytes: Buffer,
   debug: bool,
 ) -> Result<u32> {
+  let watch_pb = pb::Watch::decode(&mut Cursor::new(watch_bytes))
+    .map_err(convert_prost_decode_error_to_anyhow)?;
+
   if debug {
     println!(
-      "[napi] start_watch: db_id={:#?} watch_bytes={:#?}",
-      db_id,
-      watch_bytes.to_vec()
+      "[napi] start_watch: db_id={:#?} watch_pb={:#?}",
+      db_id, watch_pb
     )
   }
 
-  // TODO waiting on watch pr
-  // let watch_pb: pb::Watch = pb::Watch::decode(&mut Cursor::new(watch_bytes)).unwrap();
-  // if debug { println!("[napi] start_watch: db_id={:#?} watch_pb={:#?}", db_id, watch_pb) }
-
-  // let keys = watch_pb.keys.iter().map(|v| { v.key.clone() }).collect();
-  // let db: Sqlite = DBS.lock().unwrap().get(&db_id).unwrap().to_owned();
-  // let _stream = db.watch(keys);
-
-  // TODO store stream in WATCHES?
+  let keys = watch_pb.keys.iter().map(|v| v.key.clone()).collect();
+  let db = DBS
+    .lock()
+    .unwrap()
+    .get(&db_id)
+    .cloned()
+    .ok_or_else(|| anyhow::anyhow!("db not found"))?;
+  let stream = db.watch(keys).map_err(|e| e.into()).boxed();
 
   let watch_id = WATCH_ID.fetch_add(1, Ordering::Relaxed);
-  WATCHES.lock().unwrap().insert(watch_id, ());
+  WATCHES.lock().unwrap().insert(watch_id, stream);
 
   Ok(watch_id)
 }
@@ -281,14 +293,21 @@ pub async fn dequeue_next_watch_message(
     )
   }
 
-  // TODO waiting on watch pr
-  // let watch_output_pb = WatchOutput {
-  //   status: SnapshotReadStatus::SrUnspecified.into(),
-  //   keys: [].to_vec()
-  // };
-  // let bytes = to_buffer(watch_output_pb);
-  // Ok(Either::A(bytes))
-  Ok(Either::B(()))
+  let mut stream = WATCHES
+    .lock()
+    .unwrap()
+    .remove(&watch_id)
+    .ok_or_else(|| anyhow::anyhow!("watch not found"))?;
+
+  let Some(next) = stream.next().await else {
+    return Ok(Either::B(()));
+  };
+  let next = next?;
+  WATCHES.lock().unwrap().insert(watch_id, stream);
+
+  let watch_output_pb = pb::WatchOutput::from(next);
+  let bytes = to_buffer(watch_output_pb);
+  Ok(Either::A(bytes))
 }
 
 #[napi]
@@ -299,10 +318,12 @@ pub fn end_watch(db_id: u32, watch_id: u32, debug: bool) {
       db_id, watch_id
     )
   }
+
   WATCHES.lock().unwrap().remove(&watch_id);
 }
 
-//
+static NOTIFIERS_MAP: Lazy<Mutex<HashMap<String, SqliteNotifier>>> =
+  Lazy::new(|| Mutex::new(HashMap::new()));
 
 static DB_ID: AtomicU32 = AtomicU32::new(0);
 static DBS: Lazy<Mutex<HashMap<u32, Sqlite>>> =
@@ -313,7 +334,8 @@ static MSGS: Lazy<Mutex<HashMap<u32, SqliteMessageHandle>>> =
   Lazy::new(|| Mutex::new(HashMap::new()));
 
 static WATCH_ID: AtomicU32 = AtomicU32::new(0);
-static WATCHES: Lazy<Mutex<HashMap<u32, ()>>> =
+type WatchStream = BoxStream<'static, Result<Vec<WatchKeyOutput>>>;
+static WATCHES: Lazy<Mutex<HashMap<u32, WatchStream>>> =
   Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn to_buffer<T: prost::Message>(output: T) -> Buffer {
@@ -352,6 +374,7 @@ fn convert_error_to_str(err: denokv_proto::ConvertError) -> String {
     ConvertError::InvalidMutationEnqueueDeadline => {
       String::from("InvalidMutationEnqueueDeadline")
     }
+    ConvertError::TooManyWatchedKeys => String::from("TooManyWatchedKeys"),
   }
 }
 
