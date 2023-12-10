@@ -450,6 +450,8 @@ export async function endToEnd(service: KvService, { type, subtype, path }: { ty
         }
         await commitBatch(10);
         // await assertRejects(() => commitBatch(11)); // no longer enforced?
+
+        // atomic(): 1000 operations or 100 checks or  80kb worth of keys, or 800kb total transaction size whichever is reached first
     }
 
     // close
