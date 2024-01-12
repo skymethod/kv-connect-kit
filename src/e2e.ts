@@ -1,16 +1,16 @@
 // deno-lint-ignore-file no-explicit-any
-import { assert } from 'https://deno.land/std@0.208.0/assert/assert.ts';
-import { assertEquals } from 'https://deno.land/std@0.208.0/assert/assert_equals.ts';
-import { assertExists } from 'https://deno.land/std@0.208.0/assert/assert_exists.ts';
-import { assertFalse } from 'https://deno.land/std@0.208.0/assert/assert_false.ts';
-import { assertMatch } from 'https://deno.land/std@0.208.0/assert/assert_match.ts';
-import { assertNotEquals } from 'https://deno.land/std@0.208.0/assert/assert_not_equals.ts';
-import { assertRejects } from 'https://deno.land/std@0.208.0/assert/assert_rejects.ts';
-import { assertThrows } from 'https://deno.land/std@0.208.0/assert/assert_throws.ts';
+import { assert } from 'https://deno.land/std@0.212.0/assert/assert.ts';
+import { assertEquals } from 'https://deno.land/std@0.212.0/assert/assert_equals.ts';
+import { assertExists } from 'https://deno.land/std@0.212.0/assert/assert_exists.ts';
+import { assertFalse } from 'https://deno.land/std@0.212.0/assert/assert_false.ts';
+import { assertMatch } from 'https://deno.land/std@0.212.0/assert/assert_match.ts';
+import { assertNotEquals } from 'https://deno.land/std@0.212.0/assert/assert_not_equals.ts';
+import { assertRejects } from 'https://deno.land/std@0.212.0/assert/assert_rejects.ts';
+import { assertThrows } from 'https://deno.land/std@0.212.0/assert/assert_throws.ts';
 import { checkString } from './check.ts';
 import { KvListOptions, KvListSelector, KvService } from './kv_types.ts';
 import { sleep } from './sleep.ts';
-import { AssertionError } from 'https://deno.land/std@0.208.0/assert/assertion_error.ts';
+import { AssertionError } from 'https://deno.land/std@0.212.0/assert/assertion_error.ts';
 
 export async function endToEnd(service: KvService, { type, subtype, path }: { type: 'deno' | 'userland', subtype?: 'in-memory' | 'napi' | 'remote' | 'sqlite', path: string }) {
 

@@ -1,5 +1,5 @@
-import { assertInstanceOf } from 'https://deno.land/std@0.208.0/assert/assert_instance_of.ts';
-import { RedBlackTree } from 'https://deno.land/std@0.208.0/data_structures/red_black_tree.ts';
+import { assertInstanceOf } from 'https://deno.land/std@0.212.0/assert/assert_instance_of.ts';
+import { RedBlackTree } from 'https://deno.land/std@0.212.0/data_structures/red_black_tree.ts';
 import { compareBytes, equalBytes } from './bytes.ts';
 import { packKey, unpackKey } from './kv_key.ts';
 import { AtomicCheck, KvCommitError, KvCommitResult, KvConsistencyLevel, KvEntry, KvEntryMaybe, KvKey, KvListOptions, KvListSelector, KvService } from './kv_types.ts';

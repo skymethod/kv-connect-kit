@@ -1,5 +1,5 @@
-export { encodeHex, decodeHex } from 'https://deno.land/std@0.208.0/encoding/hex.ts';
-import { concat } from 'https://deno.land/std@0.208.0/bytes/concat.ts';
+export { encodeHex, decodeHex } from 'https://deno.land/std@0.212.0/encoding/hex.ts';
+import { concat } from 'https://deno.land/std@0.212.0/bytes/concat.ts';
 
 export function checkEnd(bytes: Uint8Array, pos: number) {
     const extra = bytes.length - pos;

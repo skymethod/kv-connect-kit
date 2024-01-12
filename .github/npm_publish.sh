@@ -10,7 +10,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 # install deno
-DENO_VERSION="v1.38.3"
+DENO_VERSION="v1.39.3"
 curl -fsSL https://deno.land/x/install/install.sh | DENO_INSTALL=./deno-$DENO_VERSION sh -s $DENO_VERSION
 
 # run unit tests as a sanity check

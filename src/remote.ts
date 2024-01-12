@@ -13,7 +13,7 @@ import { ProtoBasedKv, WatchCache } from './proto_based.ts';
 import { sleep } from './sleep.ts';
 import { makeUnrawWatchStream } from './unraw_watch_stream.ts';
 import { decodeV8 as _decodeV8, encodeV8 as _encodeV8 } from './v8.ts';
-import { _exponentialBackoffWithJitter } from 'https://deno.land/std@0.208.0/async/_util.ts';
+import { exponentialBackoffWithJitter } from 'https://deno.land/std@0.212.0/async/_util.ts';
 
 type Fetcher = typeof fetch;
 
@@ -234,7 +234,7 @@ class RemoteKv extends ProtoBasedKv {
                 } else if (endOfStreamReached && !readerCancelled) {
                     const readDuration = readStarted > -1 ? (Date.now() - readStarted) : 0;
                     if (readDuration > 60000) attempt = 1;  // we read for at least a minute, reset attempt counter to avoid missing updates
-                    const timeout = Math.round(_exponentialBackoffWithJitter(
+                    const timeout = Math.round(exponentialBackoffWithJitter(
                         60000, // max timeout
                         1000, // min timeout
                         attempt,

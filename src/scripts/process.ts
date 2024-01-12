@@ -1,4 +1,4 @@
-import { TextLineStream } from 'https://deno.land/std@0.208.0/streams/text_line_stream.ts';
+import { TextLineStream } from 'https://deno.land/std@0.212.0/streams/text_line_stream.ts';
 
 type Opts = { command: string, cwd?: string, args: string[], stdinFn?: (stream: WritableStream<Uint8Array>) => Promise<void>, stdoutFn?: (stream: ReadableStream<Uint8Array>) => Promise<void>, signal?: AbortSignal };
 

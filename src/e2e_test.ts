@@ -1,6 +1,6 @@
-import { chunk } from 'https://deno.land/std@0.208.0/collections/chunk.ts';
-import { parseArgs as parseFlags } from 'https://deno.land/std@0.208.0/cli/parse_args.ts';
-import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.208.0/semver/mod.ts';
+import { chunk } from 'https://deno.land/std@0.212.0/collections/chunk.ts';
+import { parseArgs as parseFlags } from 'https://deno.land/std@0.212.0/cli/parse_args.ts';
+import { parse as parseVersion, compare as compareVersion } from 'https://deno.land/std@0.212.0/semver/mod.ts';
 import { makeRemoteService } from './remote.ts';
 import { makeNativeService } from './native.ts';
 import { endToEnd } from './e2e.ts';
