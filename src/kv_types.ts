@@ -191,7 +191,8 @@ export interface Kv {
      * ```
      */
     listenQueue(
-        handler: (value: unknown) => Promise<void> | void,
+        // deno-lint-ignore no-explicit-any
+        handler: (value: any) => Promise<void> | void,
     ): Promise<void>;
 
     /**
